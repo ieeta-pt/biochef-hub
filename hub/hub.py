@@ -3,11 +3,13 @@ import glob
 import json
 import yaml
 import os
+import shutil
 
 from builders.biowasm import build as build_biowasm
 from builders.emscripten import build as build_emscripten
 
 BUILD_FILE = ".build"
+BUILD_DIR = "build"
 
 def validate_cmd(args):
     path = args.path
@@ -32,8 +34,10 @@ def build_cmd(args):
         print("No validated paths found. Run validation first.")
 
     paths = build_data["paths"]
-    print(f"Building files: {paths}")
+    print(f"Building recipes: {paths}")
     
+    os.makedirs("registry/plugins", exist_ok=True)
+    plugins_dir = "registry/plugins"
     for path in paths:
         with open(path, 'r') as file:
             data = yaml.safe_load(file)
@@ -45,13 +49,47 @@ def build_cmd(args):
             if not tool_name:
                 tool_name = data["name"]
             
-            print(f"Attempting to compile {tool_name}")
-            if wasm_strategy == "auto":
-                if not build_biowasm(tool_name, data["version"].split("-")[0]):
-                    print("Could not compile with biowasm, trying with emscripten...")
-                    source = (data["source"]["repo"],data["source"]["tag"],data["source"]["commit"])
-                    if not build_emscripten(tool_name, wasm_settings['emscripten'], source):
-                        print("Could not compile with emscripten.")
+            print(f"Attempting to build: {tool_name}")
+            
+            def build_biowasm_wrapper():
+                return build_biowasm(tool_name, data["version"].split("-")[0], output_dir=BUILD_DIR)
+
+            def build_emscripten_wrapper():
+                source = (
+                    data["source"]["repo"],
+                    data["source"]["tag"],
+                    data["source"]["commit"]
+                )
+                return build_emscripten(tool_name, wasm_settings["emscripten"], source, output_dir=BUILD_DIR)
+
+            strategies = {
+                "biowasm": [build_biowasm_wrapper],
+                "emscripten": [build_emscripten_wrapper],
+                "auto": [build_biowasm_wrapper, build_emscripten_wrapper],
+            }
+
+            output_dir = None
+            for builder in strategies.get(wasm_strategy, []):
+                output_dir = builder()
+                if output_dir: break
+            
+            if data["kind"] == "suite":
+                for operation in data["suite"]["operations"]:
+                    plugin_dir = f"{plugins_dir}/{data["version"]}/{operation["opId"]}"
+                    os.makedirs(plugin_dir, exist_ok=True)
+
+                    os.makedirs(f"{plugin_dir}/runtime/wasm", exist_ok=True)
+                    os.makedirs(f"{plugin_dir}/runtime/local", exist_ok=True)
+                    os.makedirs(f"{plugin_dir}/runtime/remote", exist_ok=True)
+                    os.makedirs(f"{plugin_dir}/runtime/federated", exist_ok=True)
+                    
+                    bin_name = operation["bin"]
+                    wasm_dir = f"{plugin_dir}/runtime/wasm"
+                    
+                    shutil.copyfile(f"{output_dir}/{bin_name}.js", f"{wasm_dir}/{bin_name}.js")
+                    shutil.copyfile(f"{output_dir}/{bin_name}.wasm", f"{wasm_dir}/{bin_name}.wasm")
+            
+            shutil.rmtree(BUILD_DIR)
 
 def test_cmd(args):
     #TODO

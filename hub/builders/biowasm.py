@@ -14,6 +14,6 @@ def build(tool_name, version, output_dir="build", biowasm_dir="biowasm", biowasm
     if os.path.isdir(f"{biowasm_dir}/build"):
         shutil.copytree(f"{biowasm_dir}/build/{tool_name}/{version}", f"{output_dir}/{tool_name}", dirs_exist_ok=True)
         shutil.rmtree(f"{biowasm_dir}/build")
-        return True
+        return os.path.abspath(f"{output_dir}/{tool_name}")
     
-    return False
+    return None

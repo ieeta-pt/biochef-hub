@@ -2,7 +2,7 @@ import subprocess
 import os
 import shutil
 
-def build(tool_name, emscripten_settings, source, build_dir="build"):
+def build(tool_name, emscripten_settings, source, output_dir="build"):
     buildsystem = emscripten_settings.get('buildsystem')
 
     if buildsystem == "make":
@@ -35,28 +35,20 @@ def build(tool_name, emscripten_settings, source, build_dir="build"):
 
         try:
             subprocess.run(f"emmake make {" ".join(emscripten_settings["env"])}", shell=True, check=True)
-            output_dir = f"{base_dir}/{tool_name}/{emscripten_settings['outputDir']}"
-            dest_dir = f"{base_dir}/{build_dir}/{tool_name}"
+            from_dir = f"{base_dir}/{tool_name}/{emscripten_settings['outputDir']}"
+            dest_dir = f"{base_dir}/{output_dir}/{tool_name}"
+            shutil.copytree(from_dir, dest_dir, dirs_exist_ok=True)
 
-            # Ensure the destination directory exists
-            os.makedirs(dest_dir, exist_ok=True)
-            
-            # Only copy .js and .wasm files
-            for root, _, files in os.walk(output_dir):
-                for file in files:
-                    if file.endswith(".js") or file.endswith(".wasm"):
-                        src_file = os.path.join(root, file)
-                        dest_file = os.path.join(dest_dir, file)
-                        shutil.copy(src_file, dest_file)
-
-            return True
+            return dest_dir
         except subprocess.CalledProcessError as e:
             print(f"Error building with emscripten: {e}")
-            return False
+            return None
         finally:
             # Restore the original Makefile from the backup
             shutil.copy(backup_file, makefile_path)
             # Remove the git repository
             shutil.rmtree(f"{base_dir}/{tool_name}")
+            # Return to the correct dir
+            os.chdir(base_dir)
 
     return False
