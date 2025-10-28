@@ -42,14 +42,16 @@ def build_registry(file_paths, build_dir):
             wasm_strategy = wasm_settings['strategy']
             if not wasm_strategy: continue
 
-            tool_name = data["build"]["wasm"].get("biowasm",{}).get("package", "")
-            if not tool_name:
-                tool_name = data["name"]
+            tool_name = data["name"]
+        
+            package_name = data["build"]["wasm"].get("biowasm",{}).get("package", "")
+            if not package_name:
+                package_name = tool_name
             
             print(f"Attempting to build: {tool_name}")
             
             def build_biowasm_wrapper():
-                return build_biowasm(tool_name, data["version"].split("-")[0], output_dir=build_dir)
+                return build_biowasm(package_name, data["version"].split("-")[0], output_dir=build_dir)
 
             def build_emscripten_wrapper():
                 source = (
