@@ -74,7 +74,7 @@ def build_registry(file_paths, build_dir):
             
             if data["kind"] == "suite":
                 for operation in data["suite"]["operations"]:
-                    plugin_dir = f"{plugins_dir}/{operation["opId"]}/{data["version"]}"
+                    plugin_dir = f"{plugins_dir}/{operation['opId']}/{data['version']}"
                     os.makedirs(plugin_dir, exist_ok=True)
 
                     for runtime in data["runtime"]["modes"]:
