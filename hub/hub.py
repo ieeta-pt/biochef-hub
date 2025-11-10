@@ -1,11 +1,24 @@
 import argparse
 import json
 import os
+import yaml
 
-from builders.builder import build_registry
+from builders.builder import build_plugins
+
+from publish.publish import publish_plugins
 
 BUILD_FILE = ".build" # file containing the validation results
 BUILD_DIR = "build" # directory where the builders should output the results
+REGISTRY_DIR = "registry"
+
+def get_valid_recipes():
+    if os.path.exists(BUILD_FILE):
+        with open(BUILD_FILE) as f:
+            build_data = json.load(f)
+            return build_data["paths"]
+    else:
+        print("No validated paths found. Run validation first.")
+        return None
 
 def validate_cmd(args):
     paths = args.paths
@@ -22,14 +35,9 @@ def validate_cmd(args):
         json.dump(build_data, f)
 
 def build_cmd(args):
-    if os.path.exists(BUILD_FILE):
-        with open(BUILD_FILE) as f:
-            build_data = json.load(f)
-    else:
-        print("No validated paths found. Run validation first.")
-
-    paths = build_data["paths"]
-    build_registry(paths, BUILD_DIR)
+    recipes = get_valid_recipes()
+    if not recipes: return
+    build_plugins(recipes, BUILD_DIR, REGISTRY_DIR)
 
 def test_cmd(args):
     #TODO
@@ -44,8 +52,8 @@ def attest_cmd(args):
     pass
 
 def publish_cmd(args):
-    #TODO
-    pass
+    registry_url = args.registry
+    publish_plugins(registry_url, REGISTRY_DIR)
 
 def index_cmd(args):
     #TODO
@@ -72,6 +80,7 @@ def main():
     attest_parser.set_defaults(func=attest_cmd)
 
     publish_parser = subparsers.add_parser("publish")
+    publish_parser.add_argument('--registry', required=True, help="URL of the registry to publish to")
     publish_parser.set_defaults(func=publish_cmd)
 
     index_parser = subparsers.add_parser("index")

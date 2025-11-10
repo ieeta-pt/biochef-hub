@@ -1,9 +1,11 @@
 import json
+from pathlib import Path
+from urllib.parse import urlparse
 import yaml
 import os
 import shutil
-from datetime import datetime
 import hashlib
+import requests
 
 from builders.biowasm import build as build_biowasm
 from builders.emscripten import build as build_emscripten
@@ -17,23 +19,28 @@ def generate_digest(file_path: str) -> str:
     
     return f"sha256:{sha256_hash.hexdigest()}"
 
-def build_registry(file_paths, build_dir):
+def download_github_license(repo_url: str, target_path: str):
+    parts = urlparse(repo_url).path.strip("/").split("/")
+    if len(parts) < 2:
+        raise ValueError("Invalid GitHub repo URL")
+    owner, repo = parts[0], parts[1]
+
+    last_error = None
+    for branch in ["main","master"]:
+        raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/LICENSE"
+        response = requests.get(raw_url)
+        if response.status_code == 200:
+            target_file = Path(target_path)
+            target_file.parent.mkdir(parents=True, exist_ok=True)
+            target_file.write_text(response.text, encoding="utf-8")
+            return
+        else:
+            last_error = response.status_code
+
+    raise Exception(f"Failed to fetch LICENSE: {last_error}")
+
+def build_plugins(file_paths, build_dir, registry_dir):
     print(f"Building recipes: {file_paths}")
-    
-    os.makedirs("registry/plugins", exist_ok=True)
-    plugins_dir = "registry/plugins"
-    
-    index_file = "registry/index.json"
-    if os.path.exists(index_file):
-        with open(index_file, "r") as f:
-            index = json.load(f)
-    else:
-        index = {
-            "version": 1,
-            "generated_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "signature": "",
-            "plugins": []
-        }
         
     for path in file_paths:
         with open(path, 'r') as file:
@@ -49,7 +56,7 @@ def build_registry(file_paths, build_dir):
                 package_name = tool_name
             
             print(f"Attempting to build: {tool_name}")
-            
+                        
             def build_biowasm_wrapper():
                 return build_biowasm(package_name, data["version"].split("-")[0], output_dir=build_dir)
 
@@ -72,9 +79,11 @@ def build_registry(file_paths, build_dir):
                 output_dir = builder()
                 if output_dir: break
             
+            download_github_license(data["source"]["repo"], f"{output_dir}/LICENSE")
+            
             if data["kind"] == "suite":
                 for operation in data["suite"]["operations"]:
-                    plugin_dir = f"{plugins_dir}/{operation['opId']}/{data['version']}"
+                    plugin_dir = f"{registry_dir}/{operation['opId']}/{data['version']}"
                     os.makedirs(plugin_dir, exist_ok=True)
 
                     for runtime in data["runtime"]["modes"]:
@@ -101,32 +110,16 @@ def build_registry(file_paths, build_dir):
                             "modes": data["runtime"]["modes"],
                             # TODO don't hardcode the modes
                             "wasm": {
-                                "wasm_url": f"{wasm_dir}/{bin_name}.wasm",
-                                "js_url": f"{wasm_dir}/{bin_name}.js",
-                                "sri": {
-                                    "wasm": generate_digest(f"{wasm_dir}/{bin_name}.wasm"),
-                                    "js":generate_digest(f"{wasm_dir}/{bin_name}.js"),
-                                }
+                                "wasm_digest": generate_digest(f"{wasm_dir}/{bin_name}.wasm"),
+                                "js_digest":generate_digest(f"{wasm_dir}/{bin_name}.js"),
                             },
                         }
                     }
                     
                     with open(f"{plugin_dir}/bundle.json", "w") as f:
                         json.dump(bundle, f, indent=4)
-
-                    if not any(p["id"] == operation["opId"] for p in index["plugins"]):
-                        plugin = {
-                            "id": operation["opId"],
-                            "version": data["version"],
-                            "bundle_url": f"{plugin_dir}/bundle.json",
-                            "digest": generate_digest(f"{plugin_dir}/bundle.json"),
-                            "status": data["status"]
-                        }
-                        index["plugins"].append(plugin)
-
-    index["version"] += 1
-    index["generated_at"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
-    with open(index_file, "w") as f:
-        json.dump(index, f, indent=4)
+                    
+                    shutil.copyfile(f"{output_dir}/LICENSE", f"{plugin_dir}/LICENSE")
+                    #TODO sbom.json
         
     shutil.rmtree(build_dir)
