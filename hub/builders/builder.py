@@ -100,6 +100,8 @@ def build_plugins(file_paths, build_dir, registry_dir):
 
                     bundle = {
                         "id": operation["opId"],
+                        "name": operation["opId"].replace(".","_"),
+                        "description": operation["description"],
                         "version": data["version"],
                         "manifest": {
                             "io": operation["io"],

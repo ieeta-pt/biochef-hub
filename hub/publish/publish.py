@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import List
 from pathlib import Path
 import oras.client
-
+import os
 
 class RegistryFile:
     def __init__(self, path: str | Path, media_type: str):
@@ -14,10 +14,19 @@ class RegistryFile:
 
 
 def publish_plugin(registry_url, plugin_id, plugin_version, files: List[RegistryFile]):
-    client = oras.client.OrasClient(hostname=registry_url, insecure=True)
-
-    ref = f"plugins/org.biochef.{plugin_id}:{plugin_version}"
-
+    if "localhost" in registry_url: 
+        client = oras.client.OrasClient(hostname=registry_url, insecure=True)
+    else:
+        username = os.getenv("GHCR_USERNAME")
+        token = os.getenv("GHCR_TOKEN")
+        print(username, token)
+        
+        if not username or not token:
+            raise Exception("Username and password missing for GHCR")
+        
+        client = oras.client.OrasClient()
+        client.login(username=username, password=token)
+    
     # Manifest-level annotations (equivalent to --annotation flags)
     annotations = {
         "org.opencontainers.image.title": f"BioChef Plugin {plugin_id}",
@@ -28,12 +37,19 @@ def publish_plugin(registry_url, plugin_id, plugin_version, files: List[Registry
         # "biochef.bundle.sbom": "sbom.json"
     }
 
-    resp = client.push(
-        target=ref,
+    target = f"{registry_url}/biochef-plugins-{plugin_id}"
+    client.push(
+        target=f'{target}:{plugin_version}',
         files=files,
         manifest_annotations=annotations,
     )
 
+    # TODO figure out a way to tag without pushing
+    client.push(
+        target=f'{target}:latest',
+        files=files,
+        manifest_annotations=annotations,
+    )
 
 media_types = {
     ".json": "application/json",

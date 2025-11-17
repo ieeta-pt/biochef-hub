@@ -34,7 +34,7 @@ def build(tool_name, emscripten_settings, source, output_dir="build"):
         env["EM_FLAGS"] = "-s USE_ZLIB=1 -s INVOKE_RUN=0 -s FORCE_FILESYSTEM=1 -s EXPORTED_RUNTIME_METHODS=['callMain','FS','PROXYFS','WORKERFS'] -s MODULARIZE=1 -s ENVIRONMENT=['web','worker'] -s ALLOW_MEMORY_GROWTH=1 -s EXIT_RUNTIME=1 -lworkerfs.js -lproxyfs.js"
 
         try:
-            subprocess.run(f"emmake make {" ".join(emscripten_settings["env"])}", shell=True, check=True)
+            subprocess.run(f"emmake make {" ".join(emscripten_settings["env"])}", shell=True, check=True, env=env)
             from_dir = f"{base_dir}/{tool_name}/{emscripten_settings['outputDir']}"
             dest_dir = f"{base_dir}/{output_dir}/{tool_name}"
             shutil.copytree(from_dir, dest_dir, dirs_exist_ok=True)
