@@ -103,6 +103,7 @@ def build_plugins(file_paths, build_dir, registry_dir):
                         "name": operation["opId"].replace(".","_"),
                         "description": operation["description"],
                         "version": data["version"],
+                        **({"category": operation["category"]} if "category" in operation else {}),
                         "manifest": {
                             "io": operation["io"],
                             "parameters": operation["parameters"]

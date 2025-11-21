@@ -1,8 +1,9 @@
 from pathlib import Path
 from typing import List
-from pathlib import Path
+import json
 import oras.client
 import os
+
 
 class RegistryFile:
     def __init__(self, path: str | Path, media_type: str):
@@ -13,21 +14,26 @@ class RegistryFile:
         return f"{self.path}:{self.media_type}"
 
 
-def publish_plugin(registry_url, plugin_id, plugin_version, files: List[RegistryFile]):
-    if "localhost" in registry_url: 
+def get_oras_client(registry_url):
+    if "localhost" in registry_url:
         client = oras.client.OrasClient(hostname=registry_url, insecure=True)
     else:
         username = os.getenv("GHCR_USERNAME")
         token = os.getenv("GHCR_TOKEN")
-        print(username, token)
-        
+
         if not username or not token:
             raise Exception("Username and password missing for GHCR")
-        
+
         client = oras.client.OrasClient()
         client.login(username=username, password=token)
-    
-    # Manifest-level annotations (equivalent to --annotation flags)
+
+    return client
+
+
+def publish_plugin(registry_url, plugin_id, plugin_version, files: List[RegistryFile]):
+
+    client = get_oras_client(registry_url)
+
     annotations = {
         "org.opencontainers.image.title": f"BioChef Plugin {plugin_id}",
         "biochef.plugin.id": plugin_id,
@@ -37,19 +43,49 @@ def publish_plugin(registry_url, plugin_id, plugin_version, files: List[Registry
         # "biochef.bundle.sbom": "sbom.json"
     }
 
-    target = f"{registry_url}/biochef-plugins-{plugin_id}"
+    target = f"biochef-plugins-{plugin_id}"
     client.push(
-        target=f'{target}:{plugin_version}',
+        target=f'{registry_url}/{target}:{plugin_version}',
         files=files,
         manifest_annotations=annotations,
     )
 
     # TODO figure out a way to tag without pushing
     client.push(
-        target=f'{target}:latest',
+        target=f'{registry_url}/{target}:latest',
         files=files,
         manifest_annotations=annotations,
     )
+
+    return target
+
+
+def publish_index(registry_url, plugin_dict):
+    index = {}
+
+    for package, bundle in plugin_dict.items():
+        index[package] = {
+            "name": bundle.get("name"),
+            "description": bundle.get("description"),
+            "category": bundle.get("category"),
+            "inputTypes": [t for inp in bundle["manifest"]["io"]["inputs"] for t in inp["types"]],
+            "outputTypes": [t for inp in bundle["manifest"]["io"]["outputs"] for t in inp["types"]]
+        }
+
+    index_path = Path("index.json")
+    index_path.write_text(json.dumps(index, indent=2))
+
+    client = get_oras_client(registry_url)
+    
+    client.push(
+        target=f"{registry_url}/biochef-plugins-index:index",
+        files=[RegistryFile(index_path, media_type="application/json")],
+        manifest_annotations={
+            "org.opencontainers.image.title": "BioChef Plugin Index",
+            "biochef.index.format": "v1"
+        },
+    )
+
 
 media_types = {
     ".json": "application/json",
@@ -72,6 +108,7 @@ def get_media_type(file: Path) -> str:
 
 def publish_plugins(registry_url, registry_dir):
     registry_path = Path(registry_dir)
+    plugin_dict = {}
 
     for plugin_folder in registry_path.iterdir():
         if not plugin_folder.is_dir():
@@ -90,4 +127,15 @@ def publish_plugins(registry_url, registry_dir):
                 if file.is_file()
             ]
 
-            publish_plugin(registry_url, plugin_id, plugin_version, files)
+            bundle = next(
+                (f for f in files if f.path.name == "bundle.json"), None)
+            if not bundle:
+                raise Exception(f"Plugin {plugin_id} is missing a bundle.json")
+
+            package = publish_plugin(
+                registry_url, plugin_id, plugin_version, files)
+
+            with open(bundle.path) as f:
+                plugin_dict[package] = json.load(f)
+
+    publish_index(registry_url, plugin_dict)
