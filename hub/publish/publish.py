@@ -44,6 +44,7 @@ def publish_plugin(registry_url, plugin_id, plugin_version, files: List[Registry
     }
 
     target = f"biochef-plugins-{plugin_id}"
+    target = target.lower()
     client.push(
         target=f'{registry_url}/{target}:{plugin_version}',
         files=files,

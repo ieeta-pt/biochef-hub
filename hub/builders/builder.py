@@ -106,7 +106,7 @@ def build_plugins(file_paths, build_dir, registry_dir):
                         **({"category": operation["category"]} if "category" in operation else {}),
                         "manifest": {
                             "io": operation["io"],
-                            "parameters": operation["parameters"]
+                            **({"parameters": operation["parameters"]} if "parameters" in operation else {}),
                         },
                         "limits": {},
                         "runtime": {
