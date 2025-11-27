@@ -1,11 +1,6 @@
 import argparse
 import json
 import os
-import yaml
-
-from builders.builder import build_plugins
-
-from publish.publish import publish_plugins
 
 BUILD_FILE = ".build" # file containing the validation results
 BUILD_DIR = "build" # directory where the builders should output the results
@@ -35,6 +30,8 @@ def validate_cmd(args):
         json.dump(build_data, f)
 
 def build_cmd(args):
+    from builders.builder import build_plugins
+
     recipes = get_valid_recipes()
     if not recipes: return
     build_plugins(recipes, BUILD_DIR, REGISTRY_DIR)
@@ -52,6 +49,8 @@ def attest_cmd(args):
     pass
 
 def publish_cmd(args):
+    from publish.publish import publish_plugins
+
     registry_url = args.registry
     publish_plugins(registry_url, REGISTRY_DIR)
 

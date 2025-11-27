@@ -1,5 +1,5 @@
-# biochef-hub/.github/workflows/build-recipe.yml
-name: Build BioChef Recipes
+# biochef-hub/.github/workflows/publish-recipes.yml
+name: Publish BioChef Recipes
 on:
   workflow_call:
     inputs:
@@ -12,10 +12,6 @@ on:
     secrets:
       REGISTRY_PASSWORD:
         required: true
-    # secrets:
-    #   COSIGN_KEY: { required: true }                       # if using key-based signing
-    #   REGISTRY_S3_ACCESS_KEY_ID: { required: true }
-    #   REGISTRY_S3_SECRET_ACCESS_KEY: { required: true }
 
 jobs:
   build:

@@ -73,7 +73,7 @@ def publish_index(registry_url, plugin_dict):
             "outputTypes": [t for inp in bundle["manifest"]["io"]["outputs"] for t in inp["types"]]
         }
 
-    index_path = Path("index.json")
+    index_path = Path("registry/index.json")
     index_path.write_text(json.dumps(index, indent=2))
 
     client = get_oras_client(registry_url)
