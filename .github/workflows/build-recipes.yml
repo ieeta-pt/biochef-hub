@@ -72,8 +72,8 @@ jobs:
       # 8) Publish to Registry and update signed index (placeholders)
       - name: Publish to Registry
         env:
-          GHCR_USERNAME: ${{ github.actor }}
-          GHCR_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+          REGISTRY_USERNAME: ${{ github.actor }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
               # REGISTRY_URL: ${{ inputs.registry_url }}
           # AWS_ACCESS_KEY_ID: ${{ secrets.REGISTRY_S3_ACCESS_KEY_ID }}
           # AWS_SECRET_ACCESS_KEY: ${{ secrets.REGISTRY_S3_SECRET_ACCESS_KEY }}

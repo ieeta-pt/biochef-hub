@@ -18,11 +18,11 @@ def get_oras_client(registry_url):
     if "localhost" in registry_url:
         client = oras.client.OrasClient(hostname=registry_url, insecure=True)
     else:
-        username = os.getenv("GHCR_USERNAME")
-        token = os.getenv("GHCR_TOKEN")
+        username = os.getenv("REGISTRY_USERNAME")
+        token = os.getenv("REGISTRY_PASSWORD")
 
         if not username or not token:
-            raise Exception("Username and password missing for GHCR")
+            raise Exception("Registry username or password missing")
 
         client = oras.client.OrasClient()
         client.login(username=username, password=token)
