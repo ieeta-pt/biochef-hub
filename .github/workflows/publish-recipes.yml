@@ -24,7 +24,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ieeta-pt/biochef-hub
-          ref: dev
           path: .hub
 
       # 3) Set up Python
