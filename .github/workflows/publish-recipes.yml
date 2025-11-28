@@ -1,0 +1,76 @@
+# biochef-hub/.github/workflows/publish-recipes.yml
+name: Publish BioChef Recipes
+on:
+  workflow_call:
+    inputs:
+      registry_url:
+        required: true
+        type: string
+      recipes:
+        required: true
+        type: string
+    secrets:
+      REGISTRY_PASSWORD:
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # 1) Checkout caller (biochef-recipes)
+      - uses: actions/checkout@v4
+
+      # 2) Checkout hub source into .hub/
+      - uses: actions/checkout@v4
+        with:
+          repository: ieeta-pt/biochef-hub
+          path: .hub
+
+      # 3) Set up Python
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # 3b) Install Python dependencies
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r ./.hub/hub/requirements.txt
+
+      # 3c) Install Emscripten (for emmake)
+      - name: Install Emscripten
+        run: |
+          sudo apt update
+          sudo apt install -y cmake python3 python3-pip nodejs npm
+          git clone https://github.com/emscripten-core/emsdk.git ./.hub/emsdk
+          cd ./.hub/emsdk
+          ./emsdk install 4.0.18
+          ./emsdk activate 4.0.18
+
+      # 4) Validate, build, test
+      - name: Validate, Build and Test Recipes
+        run: |
+          source ./.hub/emsdk/emsdk_env.sh
+          python ./.hub/hub/hub.py validate ${{ inputs.recipes }}
+          python ./.hub/hub/hub.py build
+        #  python ./.hub/hub/hub.py test --golden ./tests
+
+      # 5) SBOM + SLSA (placeholder)
+      # - run: python ./.hub/hub/hub.py sbom && python ./.hub/hub/hub.py attest
+
+      # 6) Install cosign (required for signing)
+      # - uses: sigstore/cosign-installer@v3
+
+      # 7) Sign bundle (key-based; for keyless, omit --key and ensure id-token: write)
+      # - env: { COSIGN_PASSWORD: "" }
+      #   run: python ./.hub/hub/hub.py sign --key "${{ secrets.COSIGN_KEY }}"
+
+      # 8) Publish to Registry and update signed index (placeholders)
+      - name: Publish to Registry
+        env:
+          REGISTRY_USERNAME: ${{ github.actor }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+              # REGISTRY_URL: ${{ inputs.registry_url }}
+          # AWS_ACCESS_KEY_ID: ${{ secrets.REGISTRY_S3_ACCESS_KEY_ID }}
+          # AWS_SECRET_ACCESS_KEY: ${{ secrets.REGISTRY_S3_SECRET_ACCESS_KEY }}
+        run: python ./.hub/hub/hub.py publish --registry "${{ inputs.registry_url }}"
+      # - run: python ./.hub/hub/hub.py index --sign

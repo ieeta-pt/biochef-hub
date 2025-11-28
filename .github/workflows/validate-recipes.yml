@@ -1,0 +1,49 @@
+# biochef-hub/.github/workflows/validate-recipes.yml
+name: Validate BioChef Recipes
+on:
+  workflow_call:
+    inputs:
+      recipes:
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # 1) Checkout caller (biochef-recipes)
+      - uses: actions/checkout@v4
+
+      # 2) Checkout hub source into .hub/
+      - uses: actions/checkout@v4
+        with:
+          repository: ieeta-pt/biochef-hub
+          path: .hub
+
+      # 3) Set up Python
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # 3b) Install Python dependencies
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r ./.hub/hub/requirements.txt
+
+      # 3c) Install Emscripten (for emmake)
+      - name: Install Emscripten
+        run: |
+          sudo apt update
+          sudo apt install -y cmake python3 python3-pip nodejs npm
+          git clone https://github.com/emscripten-core/emsdk.git ./.hub/emsdk
+          cd ./.hub/emsdk
+          ./emsdk install 4.0.18
+          ./emsdk activate 4.0.18
+
+      # 4) Validate, build, test
+      - name: Validate, Build and Test Recipes
+        run: |
+          source ./.hub/emsdk/emsdk_env.sh
+          python ./.hub/hub/hub.py validate ${{ inputs.recipes }}
+          python ./.hub/hub/hub.py build
+        #  python ./.hub/hub/hub.py test --golden ./tests
