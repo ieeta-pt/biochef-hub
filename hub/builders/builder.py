@@ -41,6 +41,8 @@ def download_github_license(repo_url: str, target_path: str):
 
 def build_plugins(file_paths, build_dir, registry_dir):
     print(f"Building recipes: {file_paths}")
+    if os.path.exists(registry_dir) and os.path.isdir(registry_dir):
+        shutil.rmtree(registry_dir)
         
     for path in file_paths:
         with open(path, 'r') as file:
@@ -58,12 +60,12 @@ def build_plugins(file_paths, build_dir, registry_dir):
             print(f"Attempting to build: {tool_name}")
                         
             def build_biowasm_wrapper():
-                return build_biowasm(package_name, data["version"].split("-")[0], output_dir=build_dir)
+                return build_biowasm(package_name, data["source"]["version"], output_dir=build_dir)
 
             def build_emscripten_wrapper():
                 source = (
                     data["source"]["repo"],
-                    data["source"]["tag"],
+                    data["source"]["branch"],
                     data["source"]["commit"]
                 )
                 return build_emscripten(tool_name, wasm_settings["emscripten"], source, output_dir=build_dir)
@@ -76,8 +78,11 @@ def build_plugins(file_paths, build_dir, registry_dir):
 
             output_dir = None
             for builder in strategies.get(wasm_strategy, []):
-                output_dir = builder()
-                if output_dir: break
+                try:
+                    output_dir = builder()
+                    if output_dir: break
+                except:
+                    continue
             
             download_github_license(data["source"]["repo"], f"{output_dir}/LICENSE")
             
