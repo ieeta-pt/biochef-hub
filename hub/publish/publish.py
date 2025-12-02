@@ -63,7 +63,20 @@ def publish_plugin(registry_url, plugin_id, plugin_version, files: List[Registry
 
 def publish_index(registry_url, plugin_dict):
     index = {}
-
+    index_path = Path("registry/index.json")
+    
+    try:
+        client = get_oras_client(registry_url)
+        client.pull(
+            target=f"{registry_url}/biochef-plugins-index:index",
+            outdir=os.path.dirname(index_path),
+            overwrite=True
+        )
+        with open(index_path) as f:
+            index = json.load(f)
+    except Exception as e:
+        print(f"Failed to pull existing index '{e}', creating a new one")
+    
     for package, bundle in plugin_dict.items():
         index[package] = {
             "name": bundle.get("name"),
@@ -73,7 +86,6 @@ def publish_index(registry_url, plugin_dict):
             "outputTypes": [t for inp in bundle["manifest"]["io"]["outputs"] for t in inp["types"]]
         }
 
-    index_path = Path("registry/index.json")
     index_path.write_text(json.dumps(index, indent=2))
 
     client = get_oras_client(registry_url)
