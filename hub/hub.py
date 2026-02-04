@@ -20,11 +20,22 @@ def validate_cmd(args):
     if not paths:
         raise argparse.ArgumentError(None, "Path provided does not exist")
         
+    from validate.validate import validate_recipe
+    import yaml
+        
     print(f"Validating files: {paths}")
-    #TODO actual validation logic
+    valid_paths = []
+    for path in paths:
+        with open(path) as f:
+            if validate_recipe(yaml.safe_load(f)):
+                print(f"Recipe validation successful: {path}")
+                valid_paths.append(path)
+            else:
+                print(f"Recipe validation failed: {path}")
+            
 
     build_data = {
-        "paths": paths
+        "paths": valid_paths
     }
     with open(BUILD_FILE, "w") as f:
         json.dump(build_data, f)
