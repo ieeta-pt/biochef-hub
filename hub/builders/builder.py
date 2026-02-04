@@ -19,6 +19,7 @@ def generate_digest(file_path: str) -> str:
     
     return f"sha256:{sha256_hash.hexdigest()}"
 
+# TODO get license from the files listed in the recipe
 def download_github_license(repo_url: str, target_path: str):
     parts = urlparse(repo_url).path.strip("/").split("/")
     if len(parts) < 2:
@@ -53,7 +54,7 @@ def build_plugins(file_paths, build_dir, registry_dir):
 
             tool_name = data["name"]
         
-            package_name = data["build"]["wasm"].get("biowasm",{}).get("package", "")
+            package_name = wasm_settings.get("biowasm",{}).get("package", "")
             if not package_name:
                 package_name = tool_name
             
@@ -65,8 +66,8 @@ def build_plugins(file_paths, build_dir, registry_dir):
             def build_emscripten_wrapper():
                 source = (
                     data["source"]["repo"],
-                    data["source"]["branch"],
-                    data["source"]["commit"]
+                    data["source"]["tag"],
+                    data["source"]["commit"] if "commit" in data["source"] else ""
                 )
                 return build_emscripten(tool_name, wasm_settings["emscripten"], source, output_dir=build_dir)
 
@@ -78,17 +79,13 @@ def build_plugins(file_paths, build_dir, registry_dir):
 
             output_dir = None
             for builder in strategies.get(wasm_strategy, []):
-                try:
-                    output_dir = builder()
-                    if output_dir: break
-                except:
-                    continue
+                output_dir = builder()
             
             download_github_license(data["source"]["repo"], f"{output_dir}/LICENSE")
             
             if data["kind"] == "suite":
                 for operation in data["suite"]["operations"]:
-                    plugin_dir = f"{registry_dir}/{operation['opId']}/{data['version']}"
+                    plugin_dir = f"{registry_dir}/{operation['id']}/{data['version']}"
                     os.makedirs(plugin_dir, exist_ok=True)
 
                     for runtime in data["runtime"]["modes"]:
@@ -103,26 +100,16 @@ def build_plugins(file_paths, build_dir, registry_dir):
                     shutil.copyfile(f"{output_dir}/{bin_name}.js", f"{wasm_dir}/{bin_name}.js")
                     shutil.copyfile(f"{output_dir}/{bin_name}.wasm", f"{wasm_dir}/{bin_name}.wasm")
 
-                    bundle = {
-                        "id": operation["opId"],
-                        "name": operation["opId"].replace(".","_"),
-                        "description": operation["description"],
-                        "version": data["version"],
-                        **({"category": operation["category"]} if "category" in operation else {}),
-                        "manifest": {
-                            "io": operation["io"],
-                            **({"parameters": operation["parameters"]} if "parameters" in operation else {}),
+                    bundle = operation
+                    bundle["runtime"] = {
+                        "modes": data["runtime"]["modes"],
+                        # TODO don't hardcode the modes
+                        "wasm": {
+                            "wasm_digest": generate_digest(f"{wasm_dir}/{bin_name}.wasm"),
+                            "js_digest":generate_digest(f"{wasm_dir}/{bin_name}.js"),
                         },
-                        "limits": {},
-                        "runtime": {
-                            "modes": data["runtime"]["modes"],
-                            # TODO don't hardcode the modes
-                            "wasm": {
-                                "wasm_digest": generate_digest(f"{wasm_dir}/{bin_name}.wasm"),
-                                "js_digest":generate_digest(f"{wasm_dir}/{bin_name}.js"),
-                            },
-                        }
                     }
+                    
                     
                     with open(f"{plugin_dir}/bundle.json", "w") as f:
                         json.dump(bundle, f, indent=4)

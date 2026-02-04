@@ -79,11 +79,12 @@ def publish_index(registry_url, plugin_dict):
     
     for package, bundle in plugin_dict.items():
         index[package] = {
+            "id": bundle.get("id"),
             "name": bundle.get("name"),
             "description": bundle.get("description"),
             "category": bundle.get("category"),
-            "inputTypes": [t for inp in bundle["manifest"]["io"]["inputs"] for t in inp["types"]],
-            "outputTypes": [t for inp in bundle["manifest"]["io"]["outputs"] for t in inp["types"]]
+            "inputTypes": list(set(t for inp in bundle["io"]["inputs"] for t in inp["types"])),
+            "outputTypes": list(set(t for inp in bundle["io"]["outputs"] for t in inp["types"]))
         }
 
     index_path.write_text(json.dumps(index, indent=2))
