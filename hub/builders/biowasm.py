@@ -16,4 +16,4 @@ def build(tool_name, version, output_dir="build", biowasm_dir="biowasm", biowasm
         shutil.rmtree(f"{biowasm_dir}/build")
         return os.path.abspath(f"{output_dir}/{tool_name}")
     
-    return None
+    return ""

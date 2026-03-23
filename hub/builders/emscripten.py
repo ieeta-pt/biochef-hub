@@ -35,7 +35,9 @@ def build(tool_name, emscripten_settings, source, output_dir="build"):
 
         try:
             subprocess.run(f"emmake make {" ".join(emscripten_settings["env"])}", shell=True, check=True, env=env)
-            from_dir = f"{base_dir}/{tool_name}/{emscripten_settings['outputDir']}"
+            
+            outputDir = emscripten_settings.get('outputDir', '')
+            from_dir = f"{base_dir}/{tool_name}/{outputDir}"
             dest_dir = f"{base_dir}/{output_dir}/{tool_name}"
             shutil.copytree(from_dir, dest_dir, dirs_exist_ok=True)
 
@@ -51,4 +53,4 @@ def build(tool_name, emscripten_settings, source, output_dir="build"):
             # Return to the correct dir
             os.chdir(base_dir)
 
-    return False
+    return ""

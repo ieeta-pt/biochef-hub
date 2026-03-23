@@ -3,15 +3,12 @@ from cerberus import Validator
 allowed_common_types = ["TEXT", "FASTA", "FASTQ", "NUM", "DNA", "Multi-FASTA", "BIN", "RNA", "AminoAcids", "PackagedFASTQ"]
 allowed_input_types = allowed_common_types + ["POS"]
 allowed_output_types = allowed_common_types + ["SVG", "Group"]
+allowed_parameter_types = ['string', 'integer', 'float', 'flag']
 
 schema = {
     'apiVersion': {
         'type': 'string',
         'allowed': ['v1']
-    },
-    'kind': {
-        'type': 'string',
-        'allowed': ['suite', 'tool']
     },
     'id': {'type': 'string'},
     'name': {'type': 'string'},
@@ -105,7 +102,15 @@ schema = {
                     }
                 }
             },
-            # TODO stuff other than wasm
+            'native': {
+                'type': 'dict',
+                'schema': {
+                    'buildsystem': {'type': 'string', 'allowed': ['make']},
+                    'workDir': {'type': 'string'},
+                    'outputDir': {'type': 'string'},
+                },
+                'required': False
+            }
         }
     },
     'runtime': {
@@ -120,78 +125,76 @@ schema = {
             }
         }
     },
-    'suite': {
-        # TODO non suite
-        'type': 'dict',
+    'operations': {
+        'type': 'list',
         'schema': {
-            'operations': {
-                'type': 'list',
-                'schema': {
+            'type': 'dict',
+            'schema': {
+                'id': {'type': 'string', 'regex': r'^[a-zA-Z0-9.]+$'},
+                'name': {'type': 'string'},
+                'category': {'type': 'string', 'required': False},
+                'bin': {'type': 'string'},
+                'description': {'type': 'string'},
+                'io': {
                     'type': 'dict',
                     'schema': {
-                        'id': {'type': 'string', 'regex': r'^[a-zA-Z0-9.]+$'},
-                        'name': {'type': 'string'},
-                        'category': {'type': 'string', 'required': False},
-                        'bin': {'type': 'string'},
-                        'description': {'type': 'string'},
-                        'io': {
-                            'type': 'dict',
-                            'schema': {
-                                'inputs': {
-                                    'type': 'list',
-                                    'schema': {
-                                        'type': 'dict',
-                                        'schema': {
-                                            'name': {'type': 'string'},
-                                            'types': {
-                                                'type': 'list',
-                                                'schema': {
-                                                    'type': 'string',
-                                                    'allowed': allowed_input_types                                               
-                                                },
-                                            },
-                                            'mode': {
-                                                'type': 'string',
-                                                'allowed': ['file', 'stdin']
-                                            },
-                                        }
-                                    }
-                                },
-                                'outputs': {
-                                    'type': 'list',
-                                    'schema': {
-                                        'type': 'dict',
-                                        'schema': {
-                                            'name': {'type': 'string'},
-                                            'types': {
-                                                'type': 'list',
-                                                'schema': {
-                                                    'type': 'string',
-                                                    'allowed': allowed_output_types                                               
-                                                },
-                                            },
-                                            'mode': {
-                                                'type': 'string',
-                                                'allowed': ['file', 'stdout', 'files']
-                                            },
-                                        }
-                                    }
-                                }
-                            },
-                        },
-                        'parameters': {
+                        'inputs': {
                             'type': 'list',
                             'schema': {
                                 'type': 'dict',
                                 'schema': {
                                     'name': {'type': 'string'},
-                                    'type': {'type': 'string'},
-                                    'flag': {'type': 'string', 'required': False},
-                                    'default': {'type': ['string', 'number'], 'required': False},
-                                    'required': {'type': 'boolean', 'required': False},
-                                    'hidden': {'type': 'boolean', 'required': False},
+                                    'types': {
+                                        'type': 'list',
+                                        'schema': {
+                                            'type': 'string',
+                                            'allowed': allowed_input_types
+                                        },
+                                    },
+                                    'mode': {
+                                        'type': 'string',
+                                        'allowed': ['file', 'stdin']
+                                    },
+                                    'flag': {
+                                        'type': 'string',
+                                        'required': False
+                                    },
                                 }
                             }
+                        },
+                        'outputs': {
+                            'type': 'list',
+                            'schema': {
+                                'type': 'dict',
+                                'schema': {
+                                    'name': {'type': 'string'},
+                                    'types': {
+                                        'type': 'list',
+                                        'schema': {
+                                            'type': 'string',
+                                            'allowed': allowed_output_types
+                                        },
+                                    },
+                                    'mode': {
+                                        'type': 'string',
+                                        'allowed': ['file', 'stdout', 'files']
+                                    },
+                                }
+                            }
+                        }
+                    },
+                },
+                'parameters': {
+                    'type': 'list',
+                    'schema': {
+                        'type': 'dict',
+                        'schema': {
+                            'name': {'type': 'string'},
+                            'type': {'type': 'string', 'allowed': allowed_parameter_types},
+                            'flag': {'type': 'string', 'required': False},
+                            'default': {'type': ['string', 'number'], 'required': False},
+                            'required': {'type': 'boolean', 'required': False},
+                            'hidden': {'type': 'boolean', 'required': False},
                         }
                     }
                 }
