@@ -50,13 +50,13 @@ def build_wasm(recipe, build_dir):
     def build_biowasm_wrapper():
         package_name = wasm_settings.get("biowasm",{}).get("package", "")
         if not package_name: package_name = tool_name
-        return build_biowasm(package_name, recipe["source"]["version"], output_dir=build_dir)
+        return build_biowasm(package_name, recipe["source"].get("version"), output_dir=build_dir)
 
     def build_emscripten_wrapper():
         source = (
             recipe["source"]["repo"],
-            recipe["source"]["tag"],
-            recipe["source"]["commit"] if "commit" in recipe["source"] else ""
+            recipe["source"].get("tag"),
+            recipe["source"].get("commit") 
         )
         return build_emscripten(tool_name, wasm_settings["emscripten"], source, output_dir=build_dir)
 
@@ -91,8 +91,8 @@ def build_plugins(file_paths, build_dir, registry_dir):
             elif runtime == "native":
                 source = (
                     recipe["source"]["repo"],
-                    recipe["source"]["tag"],
-                    recipe["source"]["commit"] if "commit" in recipe["source"] else ""
+                    recipe["source"].get("tag"),
+                    recipe["source"].get("commit")
                 )
                 outputs["native"] = build_native(
                     recipe["name"],

@@ -38,10 +38,12 @@ schema = {
                 'type': 'string',
             },
             'tag': {
-                'type': 'string',
+                'type': 'string', 
+                'required': False
             },
             'version': {
-                'type': 'string',
+                'type': 'string', 
+                'required': False
             },
             'commit': {
                 'type': 'string',
@@ -93,8 +95,8 @@ schema = {
                         'schema': {
                             # TODO maybe check if these exist
                             'buildsystem': {'type': 'string', 'allowed': ['make']},
-                            'workDir': {'type': 'string'},
-                            'outputDir': {'type': 'string'},
+                            'workDir': {'type': 'string', 'required': False},
+                            'outputDir': {'type': 'string', 'required': False},
                             'commands': {'type': 'list', 'schema': {'type': 'string'}},
                             'env': {'type': 'list', 'schema': {'type': 'string'}},
                         },
@@ -106,8 +108,8 @@ schema = {
                 'type': 'dict',
                 'schema': {
                     'buildsystem': {'type': 'string', 'allowed': ['make']},
-                    'workDir': {'type': 'string'},
-                    'outputDir': {'type': 'string'},
+                    'workDir': {'type': 'string', 'required': False},
+                    'outputDir': {'type': 'string', 'required': False},
                 },
                 'required': False
             }
