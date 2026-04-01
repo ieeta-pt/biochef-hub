@@ -1,0 +1,82 @@
+import re
+
+def validate_fasta(content):
+    lines = content.strip().split('\n') if content else []
+    if not lines or not lines[0].startswith('>'):
+        return False
+    sequence = ''.join(lines[1:]).strip()
+    return bool(sequence) and bool(re.fullmatch(r'[A-Z\s]+', sequence, re.I))
+
+def validate_multi_fasta(content):
+    if not content: return False
+    
+    headers = re.findall(r'^>', content, re.M)
+    entries = [entry for entry in content.split('>') if entry.strip()]
+    if len(headers) != len(entries):
+        return False
+    return all(validate_fasta('>' + entry.strip()) for entry in entries)
+
+def validate_fastq(content):
+    lines = content.strip().split('\n')
+    if len(lines) % 4 != 0:
+        return False
+    for i in range(0, len(lines), 4):
+        header, sequence, plus_line, quality = lines[i:i+4]
+        if not header.startswith('@') or not plus_line.startswith('+'):
+            return False
+        if not re.fullmatch(r'[A-Z\s]+', sequence, re.I):
+            return False
+        if not re.fullmatch(r'[\x21-\x7E]+', quality):
+            return False
+    return True
+
+def validate_dna(content):
+    return bool(re.fullmatch(r'[ACGTN]+', content.strip(), re.I))
+
+def validate_rna(content):
+    return bool(re.fullmatch(r'[ACGUN]+', content.strip(), re.I))
+
+def validate_amino_acids(content):
+    return bool(re.fullmatch(r'[ACDEFGHIKLMNPQRSTUVWY-]+', content.strip()))
+
+def validate_num(content):
+    lines = content.strip().split('\n')
+    return all(re.fullmatch(r'[+-]?(\d+(\.\d*)?|\.\d+)', line.strip()) for line in lines)
+
+def validate_bin(content):
+    lines = content.strip().split('\n')
+    return all(re.fullmatch(r'[01]+', line.strip()) for line in lines)
+
+def validate_packaged_fastq(content):
+    # TODO:
+    return False
+
+ALL_TYPES = [
+    {'type': 'FASTA', 'validator': validate_fasta},
+    {'type': 'Multi-FASTA', 'validator': validate_multi_fasta},
+    {'type': 'FASTQ', 'validator': validate_fastq},
+    {'type': 'Packaged FASTQ', 'validator': validate_packaged_fastq},
+    {'type': 'NUM', 'validator': validate_num},
+    {'type': 'BIN', 'validator': validate_bin},
+    {'type': 'DNA', 'validator': validate_dna},
+    {'type': 'RNA', 'validator': validate_rna},
+    {'type': 'AminoAcids', 'validator': validate_amino_acids},
+    {'type': 'TEXT', 'validator': lambda x: True},  # Default fallback
+]
+
+def detect_data_type(data, expected=[]):
+    if not isinstance(data, str):
+        return 'UNKNOWN'
+    
+    # First check types in expected list
+    for type_info in ALL_TYPES:
+        if type_info['type'] in expected and type_info['validator'](data):
+            return type_info['type']
+
+    # Then check remaining types
+    for type_info in ALL_TYPES:
+        if type_info['type'] == 'TEXT': continue
+        if type_info['type'] not in expected and type_info['validator'](data):
+            return type_info['type']
+
+    return 'UNKNOWN' if data else None

@@ -48,7 +48,14 @@ def build_cmd(args):
     build_plugins(recipes, BUILD_DIR, REGISTRY_DIR)
 
 def test_cmd(args):
-    #TODO
+    from tests.test import test_tools
+    failed_tests = test_tools(REGISTRY_DIR)
+    
+    if len(failed_tests) > 0:
+        raise RuntimeError(f"The following tools failed the tests: {failed_tests}")
+    else:
+        print("All tests passed")
+        
     pass
 
 def sbom_cmd(args):
