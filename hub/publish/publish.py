@@ -3,6 +3,7 @@ from typing import List
 import json
 import oras.client
 import os
+from dotenv import load_dotenv
 
 
 class RegistryFile:
@@ -18,13 +19,15 @@ def get_oras_client(registry_url):
     if "localhost" in registry_url:
         client = oras.client.OrasClient(hostname=registry_url, insecure=True)
     else:
+        load_dotenv()
         username = os.getenv("REGISTRY_USERNAME")
         token = os.getenv("REGISTRY_PASSWORD")
+        oras_auth = os.getenv("ORAS_AUTH_BACKED")
 
         if not username or not token:
             raise Exception("Registry username or password missing")
 
-        client = oras.client.OrasClient()
+        client = oras.client.OrasClient(auth_backend=oras_auth)
         client.login(username=username, password=token)
 
     return client

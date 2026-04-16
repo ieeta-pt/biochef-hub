@@ -8,7 +8,7 @@ def build(tool_name, version, output_dir="build", biowasm_dir="biowasm", biowasm
     
     base_dir = os.getcwd()
     os.chdir(biowasm_dir)
-    subprocess.run(["python", "./bin/compile.py", "--tools", tool_name])
+    subprocess.run(["python", "./bin/compile.py", "--tools", tool_name, "--versions", version])
     os.chdir(base_dir)
 
     if os.path.isdir(f"{biowasm_dir}/build"):

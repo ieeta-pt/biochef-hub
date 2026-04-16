@@ -43,7 +43,7 @@ schema = {
             },
             'version': {
                 'type': 'string', 
-                'required': False
+                'required': True
             },
             'commit': {
                 'type': 'string',
@@ -122,7 +122,7 @@ schema = {
                 'type': 'list',
                 'schema': {
                     'type': 'string',
-                    'allowed': ['wasm', 'local', 'remote']
+                    'allowed': ['wasm', 'native', 'remote']
                 }
             }
         }
@@ -161,6 +161,10 @@ schema = {
                                         'type': 'string',
                                         'required': False
                                     },
+                                    'filename': {
+                                        'type': 'string',
+                                        'required': False
+                                    },
                                 }
                             }
                         },
@@ -180,6 +184,14 @@ schema = {
                                     'mode': {
                                         'type': 'string',
                                         'allowed': ['file', 'stdout', 'files']
+                                    },
+                                    'flag': {
+                                        'type': 'string',
+                                        'required': False
+                                    },
+                                    'filename': {
+                                        'type': 'string',
+                                        'required': False
                                     },
                                 }
                             }

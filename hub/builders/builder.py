@@ -110,7 +110,8 @@ def build_plugins(file_paths, build_dir, registry_dir):
                 "modes": recipe["runtime"]["modes"],
             }
 
-            download_github_license(recipe["source"]["repo"], f"{plugin_dir}/LICENSE")
+            if "github" in recipe['source']["repo"]:
+                download_github_license(recipe["source"]["repo"], f"{plugin_dir}/LICENSE")
 
             for runtime in build_runtimes:
                 runtime_dir = f"{plugin_dir}/runtime/{runtime}"
