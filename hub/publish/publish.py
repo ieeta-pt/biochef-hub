@@ -23,11 +23,12 @@ def get_oras_client(registry_url):
         username = os.getenv("REGISTRY_USERNAME")
         token = os.getenv("REGISTRY_PASSWORD")
         oras_auth = os.getenv("ORAS_AUTH_BACKED")
+        oras_insecure = True if os.getenv("ORAS_INSECURE") == "true" else False
 
         if not username or not token:
             raise Exception("Registry username or password missing")
 
-        client = oras.client.OrasClient(auth_backend=oras_auth)
+        client = oras.client.OrasClient(auth_backend=oras_auth, insecure=oras_insecure)
         client.login(username=username, password=token)
 
     return client
