@@ -9,6 +9,9 @@ on:
       recipes:
         required: true
         type: string
+      oras_auth:
+        required: true
+        type: string
     secrets:
       REGISTRY_USERNAME:
         required: true
@@ -53,5 +56,5 @@ jobs:
         env:
           REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
           REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
-          ORAS_AUTH_BACKED: basic
+          ORAS_AUTH_BACKED: ${{ inputs.oras_auth }}
         run: python ./.hub/hub/hub.py publish --registry "${{ inputs.registry_url }}"
