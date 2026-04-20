@@ -6,6 +6,7 @@ idna==3.11
 jsonschema==4.25.1
 jsonschema-specifications==2025.9.1
 oras==0.2.38
+python-dotenv==1.2.2
 PyYAML==6.0.3
 referencing==0.37.0
 requests==2.32.5
