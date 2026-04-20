@@ -10,6 +10,8 @@ on:
         required: true
         type: string
     secrets:
+      REGISTRY_USERNAME:
+        required: true
       REGISTRY_PASSWORD:
         required: true
 
@@ -49,7 +51,7 @@ jobs:
 
       - name: Publish to Registry
         env:
-          REGISTRY_USERNAME: ${{ github.actor }}
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
           REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
           ORAS_AUTH_BACKED: basic
         run: python ./.hub/hub/hub.py publish --registry "${{ inputs.registry_url }}"
