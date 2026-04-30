@@ -1,8 +1,8 @@
 from cerberus import Validator
+from utils.type_definitions import get_allowed_input_types, get_allowed_output_types
 
-allowed_common_types = ["TEXT", "FASTA", "FASTQ", "NUM", "DNA", "Multi-FASTA", "BIN", "RNA", "AminoAcids", "PackagedFASTQ"]
-allowed_input_types = allowed_common_types + ["POS"]
-allowed_output_types = allowed_common_types + ["SVG", "Group"]
+allowed_input_types = get_allowed_input_types()
+allowed_output_types = get_allowed_output_types()
 allowed_parameter_types = ['string', 'integer', 'float', 'flag']
 
 schema = {
