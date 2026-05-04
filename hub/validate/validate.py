@@ -1,6 +1,6 @@
 from cerberus import Validator
 
-allowed_common_types = ["TEXT", "FASTA", "FASTQ", "NUM", "DNA", "Multi-FASTA", "BIN", "RNA", "AminoAcids", "PackagedFASTQ"]
+allowed_common_types = ["TEXT", "FASTA", "FASTQ", "NUM", "DNA", "Multi-FASTA", "BIN", "RNA", "AminoAcids", "PackagedFASTQ", "VCF", "BCF", "SAM", "BAM", "CRAM", "BED", "GFF"]
 allowed_input_types = allowed_common_types + ["POS"]
 allowed_output_types = allowed_common_types + ["SVG", "Group"]
 allowed_parameter_types = ['string', 'integer', 'float', 'flag']
