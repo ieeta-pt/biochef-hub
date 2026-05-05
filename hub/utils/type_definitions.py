@@ -118,11 +118,20 @@ TYPE_DEFINITIONS = [
         "id": "BED",
         "input": True,
         "output": True,
+        "validator": "bed",
+        "example": "seq\nseq1\nseq2",
     },
     {
         "id": "GFF",
         "input": True,
         "output": True,
+    },
+    {
+        "id": "LIST",
+        "input": True,
+        "output": True,
+        "validator": "list",
+        "example": "seq\t0\t10\nseq1\t0\t20",
     },
 ]
 

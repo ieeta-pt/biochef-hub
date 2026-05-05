@@ -160,6 +160,18 @@ def validate_gff(content):
 
     return True
 
+def validate_list(content):
+    if not content.strip(): 
+        return False 
+    lines = content.splitlines()
+    for line in lines:
+        if not line.strip(): 
+            continue
+        seq_id = line.split('\t')[0]        
+        if not seq_id or ' ' in seq_id:
+            return False
+    return True
+
 ALL_TYPES = [
     {'type': 'FASTA', 'validator': validate_fasta},
     {'type': 'Multi-FASTA', 'validator': validate_multi_fasta},
@@ -173,6 +185,7 @@ ALL_TYPES = [
     {'type': 'VCF', 'validator': validate_vcf},
     {'type': 'SAM', 'validator': validate_sam},
     {'type': 'BED', 'validator': validate_bed},
+    {'type': 'LIST', 'validator': validate_list},
     {'type': 'GFF', 'validator': validate_gff},
     {'type': 'TEXT', 'validator': lambda x: True},  # Default fallback
 ]
