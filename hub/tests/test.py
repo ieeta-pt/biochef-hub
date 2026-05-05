@@ -8,6 +8,7 @@ import random
 import string
 
 from utils.data_types import detect_data_type
+from utils.type_definitions import get_example_inputs
 
 seed = random.randint(0, 10_000)
 rnd = random.Random(seed)
@@ -46,31 +47,12 @@ def test_tools(registry_dir):
     return failed
 
 
-example_inputs = {
-    "TEXT": "Hello, World",
-    "FASTA": """>seq
-TTGCACTGACCTGAAGTCTTGGAGTATGACCGCGGCTCGGCTCTATCGAACGCTCGATCTAGCGCTATAGGTGGTGCCGAAGGCGGTCTGTCGTCGTA""",
-    "Multi-FASTA": """>seq1_human
-GTTCCAGTAGCGGCGTATCGTAGGTGACGTAGCAGTCGATCGCTAGCGAAGCGCTGACTAGCTCGATAGCGGCTACTCGTACGTAGTACGTAGCATACG
->seq2_cat
-AGCTGCTGATCGTGATCGAGCTCGATGCATCGATCGCTAGCGTACGTAGCTGACGTAGCGTGACTGATCGTAGCTGATCGTGACGTAGCTGACGTAGCTG""",
-    "FASTQ":
-    "@seq\n"
-    "GCTAGCTGATCGTACGTAGCGTATCGTAGCTGATCGTACGATCGTAGCTAGCTGATCGTAGCTAGCTAGCTGATCGTAGCTAGCTGATCGTACGTAGC\n"
-    "+\n"
-    "IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII",
-    "DNA": "CGTACGTAGCTGACTGATCGTAGCTAGCTGACTGACTAGCTGATCGTAGCTGATCGTACGTAGCTAGCTAGCTGACTAGCTGATCGTACGTAGCTGAC",
-    "RNA": "CGUACGUAGCUGACUGAUCGAUGCUACGUAGCUGACGUAGCUAGCUAGCUAGCUAGCUAGCUAGCUAGCUAGCUAGCUAGCUAGCUAGCUAGCUAGCUA",
-    "AminoAcids": "ACDEFGHIKLMNPQRSTVWY" * 5,
-    "NUM": "0.123\n3.432\n2.341\n1.323\n7.538\n4.122\n0.242\n0.654\n5.633",
-    "SVG": "<svg width='100' height='100'><rect width='100' height='100' style='fill:blue'/></svg>",
-    "BIN": "0\n1\n0",
-}
+example_inputs = get_example_inputs()
 
 def test_tool_outputs(tool_dir, tool_bundle):
     base_dir = os.getcwd()
 
-    print(f"[INFO] Testing tool '{tool_bundle["name"]}'")
+    print(f"[INFO] Testing tool '{tool_bundle['name']}'")
 
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -136,7 +118,7 @@ def test_tool_outputs(tool_dir, tool_bundle):
                     return False
 
             # Run tool
-            print(f"Testing tool {tool_bundle["name"]} with command {cmd}")
+            print(f"Testing tool {tool_bundle['name']} with command {cmd}")
             result = subprocess.run(
                 cmd,
                 input=tool_input.strip().encode("ascii") if tool_input else None,
@@ -178,11 +160,11 @@ def test_tool_outputs(tool_dir, tool_bundle):
                 detected = detect_data_type(content, output_def["types"])
 
                 if not detected:
-                    print(f"[WARNING] Empty output ({output_name}, {tool_bundle["name"]}, {cmd})")
+                    print(f"[WARNING] Empty output ({output_name}, {tool_bundle['name']}, {cmd})")
                     print("stderr:")
                     print(stderr.strip())
                 elif detected not in output_def["types"]:
-                    print(f"[ERROR] Unexpected output type ({output_name}, {tool_bundle["name"]}, {cmd})")
+                    print(f"[ERROR] Unexpected output type ({output_name}, {tool_bundle['name']}, {cmd})")
                     print(f"  Detected : {detected}")
                     print(f"  Expected : {output_def['types']}")
                     all_ok = False
