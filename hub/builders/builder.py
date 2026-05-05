@@ -69,6 +69,9 @@ def build_wasm(recipe, build_dir):
         output_dir = build_biowasm_wrapper()
         if not output_dir: output_dir = build_emscripten_wrapper()
 
+    if not output_dir:
+        raise RuntimeError("Failed to build WASM using selected strategy")
+
     return output_dir
 
 def build_plugins(file_paths, build_dir, registry_dir):
