@@ -1,0 +1,112 @@
+TYPE_DEFINITIONS = [
+    {
+        "id": "TEXT",
+        "input": True,
+        "output": True,
+        #"validator": "",
+        "example": "Hello, World",
+    },
+    {
+        "id": "FASTA",
+        "input": True,
+        "output": True,
+        "validator": "fasta",
+        "example": ">seq\nTTGCACTGACCTGAAGTCTTGGAGTATGACCGCGGCTCGGCTCTATCGAACGCTCGATCTAGCGCTATAGGTGGTGCCGAAGGCGGTCTGTCGTCGTA",
+    },
+    {
+        "id": "FASTQ",
+        "input": True,
+        "output": True,
+        "validator": "fastq",
+        "example": "@seq\nGCTAGCTGATCGTACGTAGCGTATCGTAGCTGATCGTACGATCGTAGCTAGCTGATCGTAGCTAGCTAGCTGATCGTAGCTAGCTGATCGTACGTAGC\n+\nIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII",
+    },
+    {
+        "id": "NUM",
+        "input": True,
+        "output": True,
+        "validator": "num",
+        "example": "0.123\n3.432\n2.341\n1.323\n7.538\n4.122\n0.242\n0.654\n5.633",
+    },
+    {
+        "id": "DNA",
+        "input": True,
+        "output": True,
+        "validator": "dna",
+        "example": "CGTACGTAGCTGACTGATCGTAGCTAGCTGACTGACTAGCTGATCGTAGCTGATCGTACGTAGCTAGCTAGCTGACTAGCTGATCGTACGTAGCTGAC",
+    },
+    {
+        "id": "Multi-FASTA",
+        "input": True,
+        "output": True,
+        "validator": "multi_fasta",
+        "example": ">seq1_human\nGTTCCAGTAGCGGCGTATCGTAGGTGACGTAGCAGTCGATCGCTAGCGAAGCGCTGACTAGCTCGATAGCGGCTACTCGTACGTAGTACGTAGCATACG\n>seq2_cat\nAGCTGCTGATCGTGATCGAGCTCGATGCATCGATCGCTAGCGTACGTAGCTGACGTAGCGTGACTGATCGTAGCTGATCGTGACGTAGCTGACGTAGCTG",
+    },
+    {
+        "id": "BIN",
+        "input": True,
+        "output": True,
+        "validator": "bin",
+        "example": "0\n1\n0",
+    },
+    {
+        "id": "RNA",
+        "input": True,
+        "output": True,
+        "validator": "rna",
+        "example": "CGUACGUAGCUGACUGAUCGAUGCUACGUAGCUGACGUAGCUAGCUAGCUAGCUAGCUAGCUAGCUAGCUAGCUAGCUAGCUAGCUAGCUAGCUAGCUA",
+    },
+    {
+        "id": "AminoAcids",
+        "input": True,
+        "output": True,
+        "validator": "amino_acids",
+        "example": "ACDEFGHIKLMNPQRSTVWY" * 5,
+    },
+    {
+        "id": "PackagedFASTQ",
+        "input": True,
+        "output": True,
+        # "validator": "packaged_fastq",
+        # "example": "",
+    },
+    {
+        "id": "POS",
+        "input": True,
+        "output": False,
+        # "validator": "pos",
+    },
+    {
+        "id": "SVG",
+        "input": False,
+        "output": True,
+        #"validator": "svg",
+        "example": "<svg width='100' height='100'><rect width='100' height='100' style='fill:blue'/></svg>",
+    },
+    {
+        "id": "Group",
+        "input": False,
+        "output": True,
+        #"validator": "group",
+        #"example": ""
+    },
+]
+
+
+def get_type_definitions():
+    return TYPE_DEFINITIONS
+
+
+def get_allowed_input_types():
+    return [type_def["id"] for type_def in TYPE_DEFINITIONS if type_def["input"]]
+
+
+def get_allowed_output_types():
+    return [type_def["id"] for type_def in TYPE_DEFINITIONS if type_def["output"]]
+
+
+def get_example_inputs():
+    return {
+        type_def["id"]: type_def["example"]
+        for type_def in TYPE_DEFINITIONS
+        if "example" in type_def
+    }

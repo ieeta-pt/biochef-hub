@@ -55,7 +55,7 @@ ALL_TYPES = [
     {'type': 'FASTA', 'validator': validate_fasta},
     {'type': 'Multi-FASTA', 'validator': validate_multi_fasta},
     {'type': 'FASTQ', 'validator': validate_fastq},
-    {'type': 'Packaged FASTQ', 'validator': validate_packaged_fastq},
+    {'type': 'PackagedFASTQ', 'validator': validate_packaged_fastq},
     {'type': 'NUM', 'validator': validate_num},
     {'type': 'BIN', 'validator': validate_bin},
     {'type': 'DNA', 'validator': validate_dna},
