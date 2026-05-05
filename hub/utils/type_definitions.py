@@ -89,6 +89,41 @@ TYPE_DEFINITIONS = [
         #"validator": "group",
         #"example": ""
     },
+    {
+        "id": "VCF",
+        "input": True,
+        "output": True,
+    },
+    {
+        "id": "BCF",
+        "input": True,
+        "output": True,
+    },
+    {
+        "id": "SAM",
+        "input": True,
+        "output": True,
+    },
+    {
+        "id": "BAM",
+        "input": True,
+        "output": True,
+    },
+    {
+        "id": "CRAM",
+        "input": True,
+        "output": True,
+    },
+    {
+        "id": "BED",
+        "input": True,
+        "output": True,
+    },
+    {
+        "id": "GFF",
+        "input": True,
+        "output": True,
+    },
 ]
 
 
