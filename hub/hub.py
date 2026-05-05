@@ -31,7 +31,7 @@ def validate_cmd(args):
                 print(f"Recipe validation successful: {path}")
                 valid_paths.append(path)
             else:
-                print(f"Recipe validation failed: {path}")
+                raise ValueError(f"Recipe validation failed: {path}")
             
 
     build_data = {
