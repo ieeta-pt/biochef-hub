@@ -51,6 +51,115 @@ def validate_packaged_fastq(content):
     # TODO:
     return False
 
+def validate_vcf(content):
+    if not content:
+        return False
+
+    lines = content.strip().split('\n')
+    header_found = False
+
+    for line in lines:
+        if line.startswith('##'):
+            continue
+        
+        if line.startswith('#CHROM'):
+            header_found = True
+            if len(line.split()) < 8:
+                return False
+            continue
+        
+        if not header_found:
+            return False
+
+        fields = line.split()
+        if len(fields) < 8:
+            return False
+
+        chrom, pos, _id, ref, alt, qual, flt, info = fields[:8]
+
+        if not pos.isdigit():
+            return False
+
+        if not re.fullmatch(r'[ACGTN]+', ref, re.I):
+            return False
+
+        if not all(re.fullmatch(r'[ACGTN,]+', a, re.I) for a in alt.split(',')):
+            return False
+
+        if qual != '.' and not re.fullmatch(r'\d+(\.\d+)?', qual):
+            return False
+
+    return header_found
+
+def validate_sam(content):
+    if not content:
+        return False
+
+    lines = content.strip().split('\n')
+    for line in lines:
+        if line.startswith('@'):  # header
+            continue
+        
+        fields = line.split('\t')
+        if len(fields) < 11:
+            return False
+
+        qname, flag, rname, pos = fields[0], fields[1], fields[2], fields[3]
+
+        if not flag.isdigit():
+            return False
+
+        if not pos.isdigit():
+            return False
+
+    return True
+
+def validate_bed(content):
+    if not content:
+        return False
+
+    lines = content.strip().split('\n')
+    for line in lines:
+        if line.startswith('track') or line.startswith('browser'):
+            continue
+        
+        fields = line.split()
+        if len(fields) < 3:
+            return False
+
+        chrom, start, end = fields[:3]
+
+        if not start.isdigit() or not end.isdigit():
+            return False
+
+    return True
+
+def validate_gff(content):
+    if not content:
+        return False
+
+    lines = content.strip().split('\n')
+    for line in lines:
+        if line.startswith('#'):
+            continue
+        
+        fields = line.split('\t')
+        if len(fields) != 9:
+            return False
+
+        seqid, source, type_, start, end, score, strand, phase, attributes = fields
+
+        if not start.isdigit() or not end.isdigit():
+            return False
+
+        if strand not in ['+', '-', '.']:
+            return False
+
+        if phase not in ['0', '1', '2', '.']:
+            return False
+
+    return True
+
 ALL_TYPES = [
     {'type': 'FASTA', 'validator': validate_fasta},
     {'type': 'Multi-FASTA', 'validator': validate_multi_fasta},
@@ -61,6 +170,10 @@ ALL_TYPES = [
     {'type': 'DNA', 'validator': validate_dna},
     {'type': 'RNA', 'validator': validate_rna},
     {'type': 'AminoAcids', 'validator': validate_amino_acids},
+    {'type': 'VCF', 'validator': validate_vcf},
+    {'type': 'SAM', 'validator': validate_sam},
+    {'type': 'BED', 'validator': validate_bed},
+    {'type': 'GFF', 'validator': validate_gff},
     {'type': 'TEXT', 'validator': lambda x: True},  # Default fallback
 ]
 
