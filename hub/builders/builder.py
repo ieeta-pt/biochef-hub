@@ -22,7 +22,15 @@ def generate_digest(file_path: str) -> str:
     return f"sha256:{sha256_hash.hexdigest()}"
 
 # TODO get license from the files listed in the recipe
-def download_github_license(repo_url: str, target_path: str):
+def write_license(repo_url, target_path, license_text=None):
+    # Recipe-supplied verbatim text wins. Used when the upstream repo carries
+    # the license in a source-file header rather than a standalone LICENSE file.
+    if license_text:
+        target_file = Path(target_path)
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        target_file.write_text(license_text, encoding="utf-8")
+        return
+
     parts = urlparse(repo_url).path.strip("/").split("/")
     if len(parts) < 2:
         raise ValueError("Invalid GitHub repo URL")
@@ -41,6 +49,9 @@ def download_github_license(repo_url: str, target_path: str):
             last_error = response.status_code
 
     raise Exception(f"Failed to fetch LICENSE: {last_error}")
+
+# Back-compat alias for any external callers.
+download_github_license = write_license
 
 def build_wasm(recipe, build_dir):
     tool_name = recipe["name"]
@@ -113,8 +124,9 @@ def build_plugins(file_paths, build_dir, registry_dir):
                 "modes": recipe["runtime"]["modes"],
             }
 
-            if "github" in recipe['source']["repo"]:
-                download_github_license(recipe["source"]["repo"], f"{plugin_dir}/LICENSE")
+            license_text = recipe.get("license", {}).get("text")
+            if license_text or "github" in recipe['source']["repo"]:
+                write_license(recipe["source"]["repo"], f"{plugin_dir}/LICENSE", license_text=license_text)
 
             for runtime in build_runtimes:
                 runtime_dir = f"{plugin_dir}/runtime/{runtime}"

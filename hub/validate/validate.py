@@ -26,8 +26,18 @@ schema = {
                 'type': 'list',
                 'schema': {'type': 'string'},
                 'minlength': 1,
+                'required': False,
                 # TODO check if license exists
-            }
+            },
+            # Optional verbatim license text. Recipe authors use this when the
+            # upstream repo carries the license in a source file header rather
+            # than a standalone LICENSE file. When present, the hub stores this
+            # text as the LICENSE artifact and skips the upstream URL fetch.
+            'text': {
+                'type': 'string',
+                'required': False,
+                'minlength': 1,
+            },
         }
     },
     'source': {
