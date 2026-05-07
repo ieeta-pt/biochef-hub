@@ -21,26 +21,31 @@ def generate_digest(file_path: str) -> str:
 
     return f"sha256:{sha256_hash.hexdigest()}"
 
-# TODO get license from the files listed in the recipe
-def download_github_license(repo_url: str, target_path: str):
+def download_github_license(repo_url: str, target_path: str, license_files=None):
     parts = urlparse(repo_url).path.strip("/").split("/")
     if len(parts) < 2:
         raise ValueError("Invalid GitHub repo URL")
     owner, repo = parts[0], parts[1]
 
-    last_error = None
-    for branch in ["main","master"]:
-        raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/LICENSE"
-        response = requests.get(raw_url)
-        if response.status_code == 200:
-            target_file = Path(target_path)
-            target_file.parent.mkdir(parents=True, exist_ok=True)
-            target_file.write_text(response.text, encoding="utf-8")
-            return
-        else:
-            last_error = response.status_code
+    # Try recipe-declared filenames first, then common fallbacks.
+    candidates = list(license_files or []) + ["LICENSE", "LICENSE.txt", "LICENSE.md", "COPYING", "COPYING.txt"]
+    seen = set()
+    candidates = [c for c in candidates if not (c in seen or seen.add(c))]
 
-    raise Exception(f"Failed to fetch LICENSE: {last_error}")
+    last_error = None
+    for branch in ["main", "master"]:
+        for filename in candidates:
+            raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{filename}"
+            response = requests.get(raw_url)
+            if response.status_code == 200:
+                target_file = Path(target_path)
+                target_file.parent.mkdir(parents=True, exist_ok=True)
+                target_file.write_text(response.text, encoding="utf-8")
+                return
+            else:
+                last_error = response.status_code
+
+    raise Exception(f"Failed to fetch license (tried {candidates}): {last_error}")
 
 def build_wasm(recipe, build_dir):
     tool_name = recipe["name"]
@@ -114,7 +119,8 @@ def build_plugins(file_paths, build_dir, registry_dir):
             }
 
             if "github" in recipe['source']["repo"]:
-                download_github_license(recipe["source"]["repo"], f"{plugin_dir}/LICENSE")
+                license_files = recipe.get("license", {}).get("files")
+                download_github_license(recipe["source"]["repo"], f"{plugin_dir}/LICENSE", license_files)
 
             for runtime in build_runtimes:
                 runtime_dir = f"{plugin_dir}/runtime/{runtime}"
