@@ -111,6 +111,7 @@ TYPE_DEFINITIONS = [
         "id": "GFF",
         "input": True,
         "output": True,
+        "example": "seq\t.\tgene\t1\t30\t.\t+\t.\tID=gene1\nseq\t.\tmRNA\t1\t30\t.\t+\t.\tID=tx1;Parent=gene1\nseq\t.\texon\t1\t30\t.\t+\t.\tParent=tx1\nseq\t.\tCDS\t1\t30\t.\t+\t0\tParent=tx1",
     },
     {
         "id": "LIST",
