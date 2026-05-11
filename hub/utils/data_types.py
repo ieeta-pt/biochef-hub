@@ -5,7 +5,7 @@ def validate_fasta(content):
     if not lines or not lines[0].startswith('>'):
         return False
     sequence = ''.join(lines[1:]).strip()
-    return bool(sequence) and bool(re.fullmatch(r'[A-Z\s]+', sequence, re.I))
+    return bool(sequence) and bool(re.fullmatch(r'[A-Z*.\-\s]+', sequence, re.I))
 
 def validate_multi_fasta(content):
     if not content: return False
