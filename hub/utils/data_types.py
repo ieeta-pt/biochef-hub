@@ -16,6 +16,23 @@ def validate_multi_fasta(content):
         return False
     return all(validate_fasta('>' + entry.strip()) for entry in entries)
 
+def validate_efa(content):
+    if not content:
+        return False
+
+    sections = [section.strip() for section in re.split(r'(?=^<)', content, flags=re.M) if section.strip()]
+    if not sections:
+        return False
+
+    for section in sections:
+        lines = section.splitlines()
+        if len(lines) < 3 or not lines[0].startswith('<'):
+            return False
+        if not validate_multi_fasta('\n'.join(lines[1:])):
+            return False
+
+    return True
+
 def validate_fastq(content):
     lines = content.strip().split('\n')
     if len(lines) % 4 != 0:
@@ -175,6 +192,7 @@ def validate_list(content):
 ALL_TYPES = [
     {'type': 'FASTA', 'validator': validate_fasta},
     {'type': 'Multi-FASTA', 'validator': validate_multi_fasta},
+    {'type': 'EFA', 'validator': validate_efa},
     {'type': 'FASTQ', 'validator': validate_fastq},
     {'type': 'PackagedFASTQ', 'validator': validate_packaged_fastq},
     {'type': 'NUM', 'validator': validate_num},
