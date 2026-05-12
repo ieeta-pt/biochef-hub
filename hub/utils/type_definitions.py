@@ -97,6 +97,7 @@ TYPE_DEFINITIONS = [
         "id": "BCF",
         "input": True,
         "output": True,
+        "king": "binary"
     },
     {
         "id": "SAM",
@@ -107,11 +108,13 @@ TYPE_DEFINITIONS = [
         "id": "BAM",
         "input": True,
         "output": True,
+        "king": "binary"
     },
     {
         "id": "CRAM",
         "input": True,
         "output": True,
+        "kind": "binary"
     },
     {
         "id": "BED",
@@ -152,3 +155,13 @@ def get_example_inputs():
         for type_def in TYPE_DEFINITIONS
         if "example" in type_def
     }
+
+def is_binary_type(type_id):
+    type_def = next(
+        (t for t in TYPE_DEFINITIONS if t["id"] == type_id),
+        None
+    )
+
+    if type_def is None: return False
+
+    return type_def.get("kind", "") == "binary"
