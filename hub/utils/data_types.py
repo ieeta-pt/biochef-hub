@@ -1,4 +1,5 @@
 import re
+import json
 
 def validate_fasta(content):
     lines = content.strip().split('\n') if content else []
@@ -189,6 +190,17 @@ def validate_list(content):
             return False
     return True
 
+def validate_json(content):
+    if not content or not content.strip():
+        return False
+
+    try:
+        json.loads(content)
+    except json.JSONDecodeError:
+        return False
+
+    return True
+
 ALL_TYPES = [
     {'type': 'FASTA', 'validator': validate_fasta},
     {'type': 'Multi-FASTA', 'validator': validate_multi_fasta},
@@ -205,6 +217,7 @@ ALL_TYPES = [
     {'type': 'BED', 'validator': validate_bed},
     {'type': 'LIST', 'validator': validate_list},
     {'type': 'GFF', 'validator': validate_gff},
+    {'type': 'JSON', 'validator': validate_json},
     {'type': 'TEXT', 'validator': lambda x: True},  # Default fallback
 ]
 
