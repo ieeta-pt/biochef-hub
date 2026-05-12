@@ -1,5 +1,11 @@
 TYPE_DEFINITIONS = [
     {
+        "id": "JSON",
+        "input": True,
+        "output": True,
+        "example": '{"samples":[{"id":"sample_1","condition":"control","value":12.5},{"id":"sample_2","condition":"treated","value":18.2}],"metadata":{"organism":"example","assay":"measurement"}}',
+    },
+    {
         "id": "TEXT",
         "input": True,
         "output": True,
