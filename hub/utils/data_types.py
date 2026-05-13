@@ -201,6 +201,25 @@ def validate_json(content):
 
     return True
 
+def validate_fai(content):
+    if not content or not content.strip():
+        return False
+
+    lines = content.strip().split('\n')
+    for line in lines:
+        parts = line.split('\t')
+        if len(parts) < 5:
+            return False
+        seq_name, length, offset, line_bases, line_width = parts[:5]
+        # Check numeric fields
+        if not all(p.isdigit() for p in [length, offset, line_bases, line_width]):
+            return False
+        # Sequence name should be non-empty
+        if not seq_name.strip():
+            return False
+
+    return True
+
 ALL_TYPES = [
     {'type': 'FASTA', 'validator': validate_fasta},
     {'type': 'Multi-FASTA', 'validator': validate_multi_fasta},
@@ -218,6 +237,7 @@ ALL_TYPES = [
     {'type': 'LIST', 'validator': validate_list},
     {'type': 'GFF', 'validator': validate_gff},
     {'type': 'JSON', 'validator': validate_json},
+    {'type': 'FAI', 'validator': validate_fai},
     {'type': 'TEXT', 'validator': lambda x: True},  # Default fallback
 ]
 
