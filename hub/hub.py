@@ -21,8 +21,18 @@ def validate_cmd(args):
         raise argparse.ArgumentError(None, "Path provided does not exist")
         
     from validate.validate import validate_recipe
+    from utils.type_definitions import validate_type_examples
     import yaml
-        
+
+    type_example_failures = validate_type_examples()
+    if type_example_failures:
+        print("Type definition example validation failed:")
+        for failure in type_example_failures:
+            print(f"  - {failure}")
+        raise ValueError("Type definition example validation failed")
+    else:
+        print("Type definition example validation successful")
+
     print(f"Validating files: {paths}")
     valid_paths = []
     for path in paths:
@@ -49,6 +59,17 @@ def build_cmd(args):
 
 def test_cmd(args):
     from tests.test import test_tools
+    from utils.type_definitions import validate_type_examples
+
+    type_example_failures = validate_type_examples()
+    if type_example_failures:
+        print("ype definition example validation failed:")
+        for failure in type_example_failures:
+            print(f"  - {failure}")
+        raise RuntimeError(f"The following tests failed: {type_example_failures}")
+    else:
+        print("Type definition example validation successful")
+
     failed_tests = test_tools(REGISTRY_DIR)
     
     if len(failed_tests) > 0:

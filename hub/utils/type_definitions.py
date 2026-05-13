@@ -165,3 +165,24 @@ def is_binary_type(type_id):
     if type_def is None: return False
 
     return type_def.get("kind", "") == "binary"
+
+def validate_type_examples():
+    from utils.data_types import ALL_TYPES
+
+    validators = {type_info["type"]: type_info["validator"] for type_info in ALL_TYPES}
+    failures = []
+
+    for type_def in TYPE_DEFINITIONS:
+        type_id = type_def["id"]
+
+        if "example" not in type_def:
+            continue
+
+        validator = validators.get(type_id)
+        if not validator:
+            continue
+
+        if not validator(type_def["example"]):
+            failures.append(f"{type_id}: example does not validate as {type_id}")
+
+    return failures
