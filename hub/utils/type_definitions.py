@@ -105,6 +105,17 @@ TYPE_DEFINITIONS = [
         "output": True,
     },
     {
+        "id": "BAI",
+        "input": True,
+        "output": True,
+        "kind": "binary"
+    },
+    {
+        "id": "FAI",
+        "input": True,
+        "output": True,
+    },
+    {
         "id": "BAM",
         "input": True,
         "output": True,
