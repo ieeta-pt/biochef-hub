@@ -97,7 +97,7 @@ TYPE_DEFINITIONS = [
         "id": "BCF",
         "input": True,
         "output": True,
-        "king": "binary"
+        "kind": "binary"
     },
     {
         "id": "SAM",
@@ -108,7 +108,7 @@ TYPE_DEFINITIONS = [
         "id": "BAM",
         "input": True,
         "output": True,
-        "king": "binary"
+        "kind": "binary"
     },
     {
         "id": "CRAM",
