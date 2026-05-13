@@ -97,6 +97,7 @@ TYPE_DEFINITIONS = [
         "id": "BCF",
         "input": True,
         "output": True,
+        "kind": "binary"
     },
     {
         "id": "SAM",
@@ -104,14 +105,27 @@ TYPE_DEFINITIONS = [
         "output": True,
     },
     {
+        "id": "BAI",
+        "input": True,
+        "output": True,
+        "kind": "binary"
+    },
+    {
+        "id": "FAI",
+        "input": True,
+        "output": True,
+    },
+    {
         "id": "BAM",
         "input": True,
         "output": True,
+        "kind": "binary"
     },
     {
         "id": "CRAM",
         "input": True,
         "output": True,
+        "kind": "binary"
     },
     {
         "id": "BED",
@@ -152,3 +166,34 @@ def get_example_inputs():
         for type_def in TYPE_DEFINITIONS
         if "example" in type_def
     }
+
+def is_binary_type(type_id):
+    type_def = next(
+        (t for t in TYPE_DEFINITIONS if t["id"] == type_id),
+        None
+    )
+
+    if type_def is None: return False
+
+    return type_def.get("kind", "") == "binary"
+
+def validate_type_examples():
+    from utils.data_types import ALL_TYPES
+
+    validators = {type_info["type"]: type_info["validator"] for type_info in ALL_TYPES}
+    failures = []
+
+    for type_def in TYPE_DEFINITIONS:
+        type_id = type_def["id"]
+
+        if "example" not in type_def:
+            continue
+
+        validator = validators.get(type_id)
+        if not validator:
+            continue
+
+        if not validator(type_def["example"]):
+            failures.append(f"{type_id}: example does not validate as {type_id}")
+
+    return failures

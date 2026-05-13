@@ -1,9 +1,16 @@
 from cerberus import Validator
-from utils.type_definitions import get_allowed_input_types, get_allowed_output_types
+from utils.type_definitions import get_allowed_input_types, get_allowed_output_types, is_binary_type
 
 allowed_input_types = get_allowed_input_types()
 allowed_output_types = get_allowed_output_types()
 allowed_parameter_types = ['string', 'integer', 'float', 'flag']
+
+def validate_output_mode(field, value, error):
+    mode = value.get("mode")
+    types = value.get("types", [])
+
+    if mode == "stdout" and any(is_binary_type(t) for t in types):
+        error(field, "binary outputs cannot use stdout")
 
 schema = {
     'apiVersion': {
@@ -38,11 +45,11 @@ schema = {
                 'type': 'string',
             },
             'tag': {
-                'type': 'string', 
+                'type': 'string',
                 'required': False
             },
             'version': {
-                'type': 'string', 
+                'type': 'string',
                 'required': True
             },
             'commit': {
@@ -172,6 +179,7 @@ schema = {
                             'type': 'list',
                             'schema': {
                                 'type': 'dict',
+                                'check_with': validate_output_mode,
                                 'schema': {
                                     'name': {'type': 'string'},
                                     'types': {
