@@ -86,7 +86,7 @@ TYPE_DEFINITIONS = [
         "id": "Group",
         "input": False,
         "output": True,
-        #"example": ""
+        # "example": ""
     },
     {
         "id": "VCF",
@@ -106,6 +106,12 @@ TYPE_DEFINITIONS = [
     },
     {
         "id": "BAI",
+        "input": True,
+        "output": True,
+        "kind": "binary"
+    },
+    {
+        "id": "MMI",
         "input": True,
         "output": True,
         "kind": "binary"
@@ -167,20 +173,24 @@ def get_example_inputs():
         if "example" in type_def
     }
 
+
 def is_binary_type(type_id):
     type_def = next(
         (t for t in TYPE_DEFINITIONS if t["id"] == type_id),
         None
     )
 
-    if type_def is None: return False
+    if type_def is None:
+        return False
 
     return type_def.get("kind", "") == "binary"
+
 
 def validate_type_examples():
     from utils.data_types import ALL_TYPES
 
-    validators = {type_info["type"]: type_info["validator"] for type_info in ALL_TYPES}
+    validators = {type_info["type"]: type_info["validator"]
+                  for type_info in ALL_TYPES}
     failures = []
 
     for type_def in TYPE_DEFINITIONS:
@@ -194,6 +204,7 @@ def validate_type_examples():
             continue
 
         if not validator(type_def["example"]):
-            failures.append(f"{type_id}: example does not validate as {type_id}")
+            failures.append(
+                f"{type_id}: example does not validate as {type_id}")
 
     return failures
