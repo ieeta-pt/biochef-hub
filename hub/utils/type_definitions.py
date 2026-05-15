@@ -117,6 +117,12 @@ TYPE_DEFINITIONS = [
         "kind": "binary"
     },
     {
+        "id": "CSI",
+        "input": True,
+        "output": True,
+        "kind": "binary"
+    },
+    {
         "id": "FAI",
         "input": True,
         "output": True,
