@@ -12,6 +12,9 @@ def validate_output_mode(field, value, error):
     if mode == "stdout" and any(is_binary_type(t) for t in types):
         error(field, "binary outputs cannot use stdout")
 
+    if mode == "file" and (value.get("flag") is None and not value.get("filename")):
+        error(field, "file outputs must have either a 'flag' or a 'filename' defined")
+
 schema = {
     'apiVersion': {
         'type': 'string',
