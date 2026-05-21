@@ -36,8 +36,17 @@ schema = {
                 'type': 'list',
                 'schema': {'type': 'string'},
                 'minlength': 1,
+                'required': False,
                 # TODO check if license exists
-            }
+            },
+            # Verbatim license text. Use when the upstream repo carries the
+            # license in a source-file header rather than a standalone LICENSE
+            # file. Mutually exclusive in practice with `files` — when both are
+            # present, `text` wins.
+            'text': {
+                'type': 'string',
+                'required': False,
+            },
         }
     },
     'source': {
