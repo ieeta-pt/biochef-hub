@@ -12,6 +12,11 @@ from builders.biowasm import build as build_biowasm
 from builders.emscripten import build as build_emscripten
 from builders.native import build as build_native
 
+def reset_dir(dir_to_reset):
+    if os.path.exists(dir_to_reset):
+        shutil.rmtree(dir_to_reset)
+    os.makedirs(dir_to_reset, exist_ok=True)
+
 def generate_digest(file_path: str) -> str:
     sha256_hash = hashlib.sha256()
 
@@ -90,10 +95,12 @@ def build_plugins(file_paths, build_dir, registry_dir):
             recipe = yaml.safe_load(file)
 
         print(f"Attempting to build: {recipe["name"]}")
+        reset_dir(build_dir)
 
         outputs = {}
         build_runtimes = recipe['build'].keys()
         for runtime in build_runtimes:
+            
             if runtime == "wasm":
                 outputs["wasm"] = build_wasm(recipe, build_dir)
             elif runtime == "native":

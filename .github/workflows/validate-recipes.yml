@@ -46,4 +46,4 @@ jobs:
           source ./.hub/emsdk/emsdk_env.sh
           python ./.hub/hub/hub.py validate ${{ inputs.recipes }}
           python ./.hub/hub/hub.py build
-        #  python ./.hub/hub/hub.py test --golden ./tests
+          python ./.hub/hub/hub.py test

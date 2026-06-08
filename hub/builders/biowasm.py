@@ -3,8 +3,9 @@ import os
 import shutil
 
 def build(tool_name, version, output_dir="build", biowasm_dir="biowasm", biowasm_repo="https://github.com/WildBunnie/biowasm"):
-    if not os.path.isdir(biowasm_dir):
-        subprocess.run(["git", "clone", biowasm_repo, biowasm_dir], check=True)
+    if os.path.isdir(biowasm_dir):
+        shutil.rmtree(biowasm_dir)    
+    subprocess.run(["git", "clone", biowasm_repo, biowasm_dir], check=True)
     
     base_dir = os.getcwd()
     os.chdir(biowasm_dir)
