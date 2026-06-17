@@ -21,9 +21,14 @@ def build(tool_name, emscripten_settings, source, output_dir="build"):
         workdir = emscripten_settings.get("workDir", ".")
         os.chdir(workdir)
 
+        # Some upstream repos ship without a Makefile and rely on the recipe's
+        # `commands:` block to create one. Only back up an existing Makefile so
+        # the original is restored at the end; if there is none, skip.
         makefile_path = "Makefile"
-        backup_file = f"Makefile.bak"
-        shutil.copy(makefile_path, backup_file)
+        backup_file = "Makefile.bak"
+        had_makefile = os.path.isfile(makefile_path)
+        if had_makefile:
+            shutil.copy(makefile_path, backup_file)
 
         commands = emscripten_settings.get("commands", [])
         for command in commands:
@@ -46,8 +51,9 @@ def build(tool_name, emscripten_settings, source, output_dir="build"):
             print(f"Error building with emscripten: {e}")
             return None
         finally:
-            # Restore the original Makefile from the backup
-            shutil.copy(backup_file, makefile_path)
+            # Restore the original Makefile only if we backed one up.
+            if had_makefile:
+                shutil.copy(backup_file, makefile_path)
             # Remove the git repository
             shutil.rmtree(f"{base_dir}/{tool_name}")
             # Return to the correct dir
