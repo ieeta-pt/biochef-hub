@@ -104,11 +104,8 @@ schema = {
                         'type': 'dict',
                         'schema': {
                             # TODO maybe check if these exist
-                            'buildsystem': {'type': 'string', 'allowed': ['make']},
-                            'workDir': {'type': 'string', 'required': False},
                             'outputDir': {'type': 'string', 'required': False},
-                            'commands': {'type': 'list', 'schema': {'type': 'string'}},
-                            'env': {'type': 'list', 'schema': {'type': 'string'}},
+                            'buildScript': {'type': 'string', 'required': True},
                         },
                         'required': False
                     }
