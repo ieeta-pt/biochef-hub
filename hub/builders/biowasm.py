@@ -1,20 +1,77 @@
-import subprocess
+from pathlib import Path
+import docker
 import os
-import shutil
 
-def build(tool_name, version, output_dir="build", biowasm_dir="biowasm", biowasm_repo="https://github.com/WildBunnie/biowasm"):
-    if os.path.isdir(biowasm_dir):
-        shutil.rmtree(biowasm_dir)    
-    subprocess.run(["git", "clone", biowasm_repo, biowasm_dir], check=True)
-    
-    base_dir = os.getcwd()
-    os.chdir(biowasm_dir)
-    subprocess.run(["python", "./bin/compile.py", "--tools", tool_name, "--versions", version])
-    os.chdir(base_dir)
+IMAGE_NAME = "biochef-biowasm-builder"
+bclient = docker.from_env()
 
-    if os.path.isdir(f"{biowasm_dir}/build"):
-        shutil.copytree(f"{biowasm_dir}/build/{tool_name}/{version}", f"{output_dir}/{tool_name}", dirs_exist_ok=True)
-        shutil.rmtree(f"{biowasm_dir}/build")
-        return os.path.abspath(f"{output_dir}/{tool_name}")
+def image_exists():
+    try:
+        bclient.images.get(IMAGE_NAME)
+        return True
+    except docker.errors.ImageNotFound:
+        return False
+
+
+def build_image(dockerfile_dir=".", dockerfile_name="Dockerfile"):
+    print("Building Biowasm Docker image...")
+
+    image, logs = bclient.images.build(
+        path=dockerfile_dir,
+        dockerfile=dockerfile_name,
+        tag=IMAGE_NAME,
+        rm=True
+    )
+
+    for chunk in logs:
+        if "stream" in chunk:
+            print(chunk["stream"], end="")
+
+    return image
+
+
+def build(tool_name, version, output_dir="build"):
+    if not image_exists():
+        build_image(dockerfile_name="biowasm.Dockerfile")
+
+    output_dir = Path(output_dir).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
     
-    return ""
+    container = bclient.containers.run(
+        image=IMAGE_NAME,
+        user=f"{os.getuid()}:{os.getgid()}",
+        working_dir="/biowasm",
+        command=[
+            "bash",
+            "-c",
+            (   
+                f"python3 ./bin/compile.py "
+                f"--tools {tool_name} "
+                f"--versions {version} && "
+                f"cp -r build/{tool_name}/{version} /output/{tool_name}"
+            ),
+        ],
+        volumes={
+            str(output_dir): {
+                "bind": "/output",
+                "mode": "rw",
+            }
+        },
+        detach=True,
+    )
+
+    try:
+        for line in container.logs(stream=True):
+            print(line.decode(), end="")
+
+        result = container.wait()
+
+        if result["StatusCode"] != 0:
+            print(f"Build failed with code {result['StatusCode']}")
+            return ""
+
+    finally:
+        container.remove()
+
+
+    return output_dir / tool_name
