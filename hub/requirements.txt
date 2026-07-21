@@ -12,3 +12,7 @@ referencing==0.37.0
 requests==2.32.5
 rpds-py==0.29.0
 urllib3==2.5.0
+cyclonedx-python-lib==11.11.0
+license-expression==30.4.4
+scancode-toolkit==32.5.0
+cryptography==49.0.0

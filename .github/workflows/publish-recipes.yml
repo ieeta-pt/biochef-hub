@@ -12,49 +12,256 @@ on:
       oras_auth:
         required: true
         type: string
+      package_prefix:
+        required: false
+        type: string
+        default: biochef-plugins-
+      signing_policy:
+        required: true
+        type: string
+      publish:
+        required: false
+        type: boolean
+        default: true
+      publish_catalog:
+        required: false
+        type: boolean
+        default: false
+      hub_ref:
+        required: false
+        type: string
+        default: master
     secrets:
       REGISTRY_USERNAME:
         required: true
       REGISTRY_PASSWORD:
         required: true
+      BIOCHEF_CATALOG_SIGNING_PRIVATE_JWK:
+        required: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    outputs:
+      hub_sha: ${{ steps.hub_identity.outputs.sha }}
+    permissions:
+      contents: read
+    env:
+      REGISTRY_DIR: registry
+      EMSDK_VERSION: "4.0.18"
+      EMSDK_COMMIT: "eb5eb4b3b2b792f44ded198bfe615c985da5be2c"
+      BIOWASM_REPOSITORY: "https://github.com/WildBunnie/biowasm"
+      BIOWASM_COMMIT: "7ce9c29ece51987d1cd66568ec5dd4f45a9f8021"
 
-      - uses: actions/checkout@v4
+    steps:
+      - name: Checkout caller recipes
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout hub source
+        uses: actions/checkout@v4
         with:
           repository: ieeta-pt/biochef-hub
+          ref: ${{ inputs.hub_ref }}
           path: .hub
+          persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - name: Record exact hub revision
+        id: hub_identity
+        run: echo "sha=$(git -C .hub rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - run: |
+      - name: Install Python dependencies
+        run: |
           python -m pip install --upgrade pip
           pip install -r ./.hub/hub/requirements.txt
 
-      - name: Install Emscripten
+      - name: Install pinned Emscripten
         run: |
           sudo apt update
           sudo apt install -y cmake python3 python3-pip nodejs npm
-          git clone https://github.com/emscripten-core/emsdk.git ./.hub/emsdk
-          cd ./.hub/emsdk
-          ./emsdk install 4.0.18
-          ./emsdk activate 4.0.18
+          git clone https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          git -C "$RUNNER_TEMP/emsdk" checkout "$EMSDK_COMMIT"
+          "$RUNNER_TEMP/emsdk/emsdk" install "$EMSDK_VERSION"
+          "$RUNNER_TEMP/emsdk/emsdk" activate "$EMSDK_VERSION"
 
-      - name: Validate, Build and Test Recipes
+      - name: Validate and build recipes
+        env:
+          RECIPE_PATHS: ${{ inputs.recipes }}
         run: |
-          source ./.hub/emsdk/emsdk_env.sh
-          python ./.hub/hub/hub.py validate ${{ inputs.recipes }}
+          REQUESTED_EMSDK_VERSION="$EMSDK_VERSION"
+          REQUESTED_EMSDK_COMMIT="$EMSDK_COMMIT"
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          export EMSDK_VERSION="$REQUESTED_EMSDK_VERSION"
+          export EMSDK_COMMIT="$REQUESTED_EMSDK_COMMIT"
+          read -r -a recipe_paths <<< "$RECIPE_PATHS"
+          if [ "${#recipe_paths[@]}" -eq 0 ]; then
+            echo "No recipe paths were provided"
+            exit 1
+          fi
+          python ./.hub/hub/hub.py validate "${recipe_paths[@]}"
           python ./.hub/hub/hub.py build
+
+      - name: Generate CycloneDX SBOMs
+        run: |
+          python ./.hub/hub/hub.py sbom --registry-dir "$REGISTRY_DIR" --recipes-dir recipes
+
+      - name: Run strict SBOM evidence check
+        run: |
+          python ./.hub/hub/hub.py sbom-check --registry-dir "$REGISTRY_DIR"
+
+      - name: Transfer checked bundle evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: biochef-checked-bundles
+          path: ${{ env.REGISTRY_DIR }}
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    if: inputs.publish
+    needs: build
+    runs-on: ubuntu-latest
+    concurrency:
+      group: biochef-catalog-${{ inputs.registry_url }}-${{ inputs.package_prefix }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+    env:
+      REGISTRY_DIR: registry
+
+    steps:
+      - name: Checkout caller recipes
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout exact hub source used by build
+        uses: actions/checkout@v4
+        with:
+          repository: ieeta-pt/biochef-hub
+          ref: ${{ needs.build.outputs.hub_sha }}
+          path: .hub
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r ./.hub/hub/requirements.txt
+
+      - name: Download checked bundle evidence
+        uses: actions/download-artifact@v8
+        with:
+          name: biochef-checked-bundles
+          path: ${{ env.REGISTRY_DIR }}
+
+      - name: Regenerate and check transferred SBOM evidence
+        run: |
+          python ./.hub/hub/hub.py sbom --registry-dir "$REGISTRY_DIR" --recipes-dir recipes
+          python ./.hub/hub/hub.py sbom-check --registry-dir "$REGISTRY_DIR"
 
       - name: Publish to Registry
         env:
           REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
           REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
-          ORAS_AUTH_BACKED: ${{ inputs.oras_auth }}
-        run: python ./.hub/hub/hub.py publish --registry "${{ inputs.registry_url }}"
+          ORAS_AUTH_BACKEND: ${{ inputs.oras_auth }}
+          REGISTRY_URL: ${{ inputs.registry_url }}
+          PACKAGE_PREFIX: ${{ inputs.package_prefix }}
+        run: |
+          python ./.hub/hub/hub.py publish \
+            --registry "$REGISTRY_URL" \
+            --package-prefix "$PACKAGE_PREFIX"
+
+      - name: Generate SLSA provenance predicates
+        env:
+          HUB_REPOSITORY: ieeta-pt/biochef-hub
+          HUB_REF: ${{ inputs.hub_ref }}
+        run: |
+          python ./.hub/hub/hub.py provenance \
+            --registry-dir "$REGISTRY_DIR" \
+            --publish-results "$REGISTRY_DIR/publish-results.json" \
+            --hub-repository "$HUB_REPOSITORY" \
+            --hub-ref "$HUB_REF" \
+            --workflow-path ".github/workflows/publish-recipes.yml"
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4
+
+      - name: Authenticate Cosign to registry
+        env:
+          REGISTRY_URL: ${{ inputs.registry_url }}
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+          REGISTRY_HOST="${REGISTRY_URL#http://}"
+          REGISTRY_HOST="${REGISTRY_HOST#https://}"
+          REGISTRY_HOST="${REGISTRY_HOST%%/*}"
+          echo "$REGISTRY_PASSWORD" | docker login "$REGISTRY_HOST" -u "$REGISTRY_USERNAME" --password-stdin
+
+      - name: Sign and attest published bundles
+        env:
+          COSIGN_YES: "true"
+          SIGNING_POLICY: ${{ inputs.signing_policy }}
+        run: |
+          python ./.hub/hub/hub.py sign-attest \
+            --registry-dir "$REGISTRY_DIR" \
+            --publish-results "$REGISTRY_DIR/publish-results.json" \
+            --policy "$SIGNING_POLICY" \
+            --max-attempts 4 \
+            --retry-delay-seconds 5
+
+      - name: Verify published signatures and attestations
+        env:
+          SIGNING_POLICY: ${{ inputs.signing_policy }}
+        run: |
+          python ./.hub/hub/hub.py verify-attestations \
+            --registry-dir "$REGISTRY_DIR" \
+            --publish-results "$REGISTRY_DIR/publish-results.json" \
+            --policy "$SIGNING_POLICY" \
+            --report "$REGISTRY_DIR/signing-verification-report.json"
+
+      - name: Generate, sign, and publish verified catalog
+        if: inputs.publish_catalog
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+          ORAS_AUTH_BACKEND: ${{ inputs.oras_auth }}
+          BIOCHEF_CATALOG_SIGNING_PRIVATE_JWK: ${{ secrets.BIOCHEF_CATALOG_SIGNING_PRIVATE_JWK }}
+          REGISTRY_URL: ${{ inputs.registry_url }}
+          PACKAGE_PREFIX: ${{ inputs.package_prefix }}
+          SIGNING_POLICY: ${{ inputs.signing_policy }}
+        run: |
+          python ./.hub/hub/hub.py publish-catalog \
+            --registry "$REGISTRY_URL" \
+            --registry-dir "$REGISTRY_DIR" \
+            --publish-results "$REGISTRY_DIR/publish-results.json" \
+            --verification-report "$REGISTRY_DIR/signing-verification-report.json" \
+            --policy "$SIGNING_POLICY" \
+            --package-prefix "$PACKAGE_PREFIX"
+
+      - name: Sign verified catalog OCI digest
+        if: inputs.publish_catalog
+        env:
+          COSIGN_YES: "true"
+          SIGNING_POLICY: ${{ inputs.signing_policy }}
+        run: |
+          CATALOG_DIGEST_REF="$(python -c 'import json; print(json.load(open("registry/catalog-publish-results.json"))["latest_digest_reference"])')"
+          cosign sign --yes "$CATALOG_DIGEST_REF"
+          CERTIFICATE_IDENTITY="$(python -c 'import json, sys; print(json.load(open(sys.argv[1]))["certificate_identity"])' "$SIGNING_POLICY")"
+          CERTIFICATE_ISSUER="$(python -c 'import json, sys; print(json.load(open(sys.argv[1]))["certificate_oidc_issuer"])' "$SIGNING_POLICY")"
+          cosign verify \
+            --certificate-identity "$CERTIFICATE_IDENTITY" \
+            --certificate-oidc-issuer "$CERTIFICATE_ISSUER" \
+            "$CATALOG_DIGEST_REF"
