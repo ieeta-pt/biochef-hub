@@ -1,6 +1,8 @@
 from pathlib import Path
 import docker
 import os
+import tarfile
+import io
 
 IMAGE_NAME = "biochef-biowasm-builder"
 bclient = docker.from_env()
@@ -30,6 +32,33 @@ def build_image(dockerfile_dir=".", dockerfile_name="Dockerfile"):
     return image
 
 
+def copy_from_container(container, source_path, destination):
+    """
+    Copies the contents of the folder at source_path 
+    from inside the container to the destination
+    """
+    
+    buffer = io.BytesIO()
+    
+    stream, _ = container.get_archive(source_path)
+    for chunk in stream:
+        buffer.write(chunk)
+
+    buffer.seek(0)
+
+    destination = Path(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+
+    with tarfile.open(fileobj=buffer) as tar:
+        members = tar.getmembers()
+
+        for member in members:
+            # Remove the top-level directory so only the contents are extracted
+            path_parts = Path(member.name).parts
+            member.name = str(Path(*path_parts[1:]))
+
+        tar.extractall(destination, members)
+
 def build(tool_name, version, output_dir="build"):
     if not image_exists():
         build_image(dockerfile_name="biowasm.Dockerfile")
@@ -47,16 +76,9 @@ def build(tool_name, version, output_dir="build"):
             (   
                 f"python3 ./bin/compile.py "
                 f"--tools {tool_name} "
-                f"--versions {version} && "
-                f"cp -r build/{tool_name}/{version} /output/{tool_name}"
+                f"--versions {version}"
             ),
         ],
-        volumes={
-            str(output_dir): {
-                "bind": "/output",
-                "mode": "rw",
-            }
-        },
         detach=True,
     )
 
@@ -70,8 +92,13 @@ def build(tool_name, version, output_dir="build"):
             print(f"Build failed with code {result['StatusCode']}")
             return ""
 
+        copy_from_container(
+            container,
+            f"/biowasm/build/{tool_name}/{version}",
+            output_dir / tool_name,
+        )
+        
     finally:
         container.remove()
-
 
     return output_dir / tool_name
