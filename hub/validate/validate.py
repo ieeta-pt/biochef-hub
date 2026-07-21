@@ -106,6 +106,7 @@ schema = {
                             # TODO maybe check if these exist
                             'outputDir': {'type': 'string', 'required': False},
                             'buildScript': {'type': 'string', 'required': True},
+                            'emscriptenVersion': {'type': 'string', 'required': True},
                         },
                         'required': False
                     }
