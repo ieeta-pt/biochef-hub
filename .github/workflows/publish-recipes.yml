@@ -197,7 +197,7 @@ jobs:
             --workflow-path ".github/workflows/publish-recipes.yml"
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v4
+        uses: sigstore/cosign-installer@v4.1.2
 
       - name: Authenticate Cosign to registry
         env:
