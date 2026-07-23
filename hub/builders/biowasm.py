@@ -6,6 +6,7 @@ import io
 
 IMAGE_NAME = "biochef-biowasm-builder"
 bclient = docker.from_env()
+BUILDERS_DIR = Path(__file__).resolve().parent
 
 def image_exists():
     try:
@@ -61,7 +62,7 @@ def copy_from_container(container, source_path, destination):
 
 def build(tool_name, version, output_dir="build"):
     if not image_exists():
-        build_image(dockerfile_name="biowasm.Dockerfile")
+        build_image(str(BUILDERS_DIR), dockerfile_name="biowasm.Dockerfile")
 
     output_dir = Path(output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
