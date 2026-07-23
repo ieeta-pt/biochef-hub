@@ -52,7 +52,7 @@ def download_github_license(repo_url: str, target_path: str, license_files=None)
 
     raise Exception(f"Failed to fetch license (tried {candidates}): {last_error}")
 
-def build_wasm(recipe, build_dir):
+def build_wasm(recipe, recipe_dir, build_dir):
     tool_name = recipe["name"]
     wasm_settings = recipe['build']['wasm']
     wasm_strategy = wasm_settings['strategy']
@@ -68,7 +68,7 @@ def build_wasm(recipe, build_dir):
             recipe["source"].get("tag"),
             recipe["source"].get("commit") 
         )
-        return build_emscripten(tool_name, wasm_settings["emscripten"], source, output_dir=build_dir)
+        return build_emscripten(tool_name, recipe_dir, wasm_settings["emscripten"], source, output_dir=build_dir)
 
     output_dir = None
     if wasm_strategy == "biowasm":
@@ -91,6 +91,8 @@ def build_plugins(file_paths, build_dir, registry_dir):
         shutil.rmtree(registry_dir)
 
     for path in file_paths:
+        path = Path(path).resolve()
+
         with open(path, 'r') as file:
             recipe = yaml.safe_load(file)
 
@@ -100,9 +102,9 @@ def build_plugins(file_paths, build_dir, registry_dir):
         outputs = {}
         build_runtimes = recipe['build'].keys()
         for runtime in build_runtimes:
-            
             if runtime == "wasm":
-                outputs["wasm"] = build_wasm(recipe, build_dir)
+                recipe_dir = path.parent
+                outputs["wasm"] = build_wasm(recipe, recipe_dir, build_dir)
             elif runtime == "native":
                 source = (
                     recipe["source"]["repo"],
