@@ -31,6 +31,7 @@ def build(tool_name, settings, source, output_dir="build"):
                 from_dir,
                 dest_dir,
                 dirs_exist_ok=True,
+                symlinks=True,
                 ignore=shutil.ignore_patterns(".*")
             )
             
