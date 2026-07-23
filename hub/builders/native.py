@@ -27,7 +27,12 @@ def build(tool_name, settings, source, output_dir="build"):
             outputDir = settings.get('outputDir', '')
             from_dir = f"{base_dir}/{tool_name}/{outputDir}"
             dest_dir = f"{base_dir}/{output_dir}/{tool_name}"
-            shutil.copytree(from_dir, dest_dir, dirs_exist_ok=True)
+            shutil.copytree(
+                from_dir,
+                dest_dir,
+                dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns(".*")
+            )
             
             return dest_dir
         except subprocess.CalledProcessError as e:
