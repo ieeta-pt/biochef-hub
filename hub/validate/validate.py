@@ -1,9 +1,17 @@
 from cerberus import Validator
 from utils.type_definitions import get_allowed_input_types, get_allowed_output_types, is_binary_type
+from pathlib import Path
+import re
+from urllib.parse import urlparse
+from license_expression import ExpressionError, get_spdx_licensing
 
 allowed_input_types = get_allowed_input_types()
 allowed_output_types = get_allowed_output_types()
 allowed_parameter_types = ['string', 'integer', 'float', 'flag']
+spdx_licensing = get_spdx_licensing()
+license_ref = re.compile(
+    r"^(?:DocumentRef-[A-Za-z0-9.-]+:)?LicenseRef-[A-Za-z0-9.-]+$"
+)
 
 def validate_output_mode(field, value, error):
     mode = value.get("mode")
@@ -14,6 +22,92 @@ def validate_output_mode(field, value, error):
 
     if mode == "file" and (value.get("flag") is None and not value.get("filename")):
         error(field, "file outputs must have either a 'flag' or a 'filename' defined")
+
+def validate_source_identity(field, value, error):
+    repo = value.get("repo")
+    url = value.get("url")
+    tag = value.get("tag")
+    commit = value.get("commit")
+    source_hash = value.get("sha256")
+
+    if repo and url:
+        error(field, "source must declare either 'repo' or 'url', not both")
+
+    if repo and source_hash:
+        error(field, "source.sha256 is only valid for source.url or vendored source declarations")
+
+    if commit and not repo:
+        error(field, "source.commit is only valid for git sources with source.repo")
+
+    if tag and not repo:
+        error(field, "source.tag is only valid for git sources with source.repo")
+
+    if repo and not commit:
+        error(field, "git sources must declare an immutable source.commit")
+
+    for candidate in [repo]:
+        if not candidate:
+            continue
+        parsed = urlparse(candidate)
+        if (
+            parsed.scheme != "https"
+            or not parsed.netloc
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ):
+            error(field, "git source repositories must be credential-free HTTPS URLs")
+
+    if url and not source_hash:
+        error(field, "archive or single-file sources must declare source.sha256")
+
+    if not repo and not url and not source_hash:
+        error(field, "source must declare source.repo + source.commit, source.url + source.sha256, or a vendored source.sha256")
+
+def validate_license_evidence(field, value, error):
+    if not value.get("spdx"):
+        error(field, "license.spdx is required")
+
+    if not value.get("files") and not value.get("evidence_files") and not value.get("url"):
+        error(field, "license must declare at least one of license.files, license.evidence_files, or license.url")
+
+    if value.get("url") and not value.get("sha256"):
+        error(field, "license.url requires license.sha256 so the fetched license evidence is reproducible")
+
+    if value.get("sha256") and not value.get("url"):
+        error(field, "license.sha256 is only valid with license.url")
+
+def validate_spdx_license_expression(field, value, error):
+    try:
+        expression = spdx_licensing.parse(value, validate=False)
+    except ExpressionError as exc:
+        error(field, f"invalid SPDX license expression: {exc}")
+        return
+    unknown = [
+        symbol.key
+        for symbol in expression.symbols
+        if symbol.key not in spdx_licensing.known_symbols
+        and not license_ref.fullmatch(symbol.key)
+    ]
+    if unknown:
+        error(field, f"unknown SPDX license identifier(s): {unknown}")
+
+def validate_safe_relative_path(field, value, error):
+    candidate = Path(value)
+    if not value or "\\" in value or candidate.is_absolute() or ".." in candidate.parts:
+        error(field, "path must be a safe relative POSIX path")
+
+def builder_source_errors(recipe: dict) -> list[str]:
+    source = recipe.get("source") or {}
+    build = recipe.get("build") or {}
+    errors = []
+    if "native" in build and not source.get("repo"):
+        errors.append("native builds currently require source.repo + source.commit")
+    wasm = build.get("wasm") or {}
+    if wasm.get("strategy") == "emscripten" and not source.get("repo"):
+        errors.append("Emscripten builds currently require source.repo + source.commit")
+    return errors
 
 schema = {
     'apiVersion': {
@@ -27,25 +121,52 @@ schema = {
     'homepage': {'type': 'string'},
     'license': {
         'type': 'dict',
+        'check_with': validate_license_evidence,
         'schema': {
             'spdx': {
                 'type': 'string',
-                # TODO check with spdx license list
+                'check_with': validate_spdx_license_expression,
+                'required': True,
             },
             'files': {
                 'type': 'list',
-                'schema': {'type': 'string'},
+                'schema': {'type': 'string', 'check_with': validate_safe_relative_path},
                 'minlength': 1,
-                # TODO check if license exists
+                'required': False,
+            },
+            'evidence_files': {
+                'type': 'list',
+                'schema': {'type': 'string', 'check_with': validate_safe_relative_path},
+                'minlength': 1,
+                'required': False,
+            },
+            'url': {
+                'type': 'string',
+                'required': False,
+            },
+            'sha256': {
+                'type': 'string',
+                'regex': '^[a-f0-9]{64}$',
+                'required': False,
             }
         }
     },
     'source': {
-        # TODO: perhaps check if they exist
         'type': 'dict',
+        'check_with': validate_source_identity,
         'schema': {
             'repo': {
                 'type': 'string',
+                'required': False,
+            },
+            'url': {
+                'type': 'string',
+                'required': False,
+            },
+            'sha256': {
+                'type': 'string',
+                'regex': '^[a-fA-F0-9]{64}$',
+                'required': False,
             },
             'tag': {
                 'type': 'string',
@@ -57,6 +178,7 @@ schema = {
             },
             'commit': {
                 'type': 'string',
+                'regex': '^[a-f0-9]{40}$',
                 'required': False,
             }
         },
@@ -103,9 +225,8 @@ schema = {
                     'emscripten': {
                         'type': 'dict',
                         'schema': {
-                            # TODO maybe check if these exist
-                            'outputDir': {'type': 'string', 'required': False},
-                            'buildScript': {'type': 'string', 'required': True},
+                            'outputDir': {'type': 'string', 'check_with': validate_safe_relative_path, 'required': False},
+                            'buildScript': {'type': 'string', 'check_with': validate_safe_relative_path, 'required': True},
                             'emscriptenVersion': {'type': 'string', 'required': True},
                         },
                         'required': False
@@ -116,8 +237,8 @@ schema = {
                 'type': 'dict',
                 'schema': {
                     'buildsystem': {'type': 'string', 'allowed': ['make']},
-                    'workDir': {'type': 'string', 'required': False},
-                    'outputDir': {'type': 'string', 'required': False},
+                    'workDir': {'type': 'string', 'check_with': validate_safe_relative_path, 'required': False},
+                    'outputDir': {'type': 'string', 'check_with': validate_safe_relative_path, 'required': False},
                 },
                 'required': False
             }
@@ -234,5 +355,11 @@ def validate_recipe(recipe: dict):
 
     if not result:
         print(v.errors)
+        return False
+
+    source_errors = builder_source_errors(recipe)
+    if source_errors:
+        print({"source": source_errors})
+        result = False
 
     return result
