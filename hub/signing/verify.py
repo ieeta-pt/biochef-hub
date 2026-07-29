@@ -19,7 +19,12 @@ from signing.provenance import (
 
 
 CYCLONEDX_PREDICATE_TYPE = "https://cyclonedx.org/bom"
-IN_TOTO_STATEMENT_TYPE = "https://in-toto.io/Statement/v1"
+IN_TOTO_STATEMENT_TYPES = frozenset(
+    {
+        "https://in-toto.io/Statement/v0.1",
+        "https://in-toto.io/Statement/v1",
+    }
+)
 
 
 class VerificationError(RuntimeError):
@@ -473,7 +478,7 @@ def verify_attestation_payload(
     matches = False
     for statement in attestation_statements(output):
         if (
-            statement.get("_type") == IN_TOTO_STATEMENT_TYPE
+            statement.get("_type") in IN_TOTO_STATEMENT_TYPES
             and statement.get("predicateType") == predicate_type
             and statement.get("predicate") == local
             and any(
