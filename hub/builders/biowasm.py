@@ -99,6 +99,10 @@ def build(tool_name, version, output_dir="build", declared_source=None, license_
         for line in container.logs(stream=True):
             print(line.decode(errors="replace"), end="")
         status = container.wait()
+        if status.get("StatusCode") != 0:
+            evidence["status"] = {"exit_code": status.get("StatusCode")}
+            return {"output_dir": "", "evidence": evidence}
+
         observations, license_payload = read_observations(container)
         if observations.get("compile_exit_code") != status.get("StatusCode"):
             raise ContainerEvidenceError(
@@ -118,8 +122,6 @@ def build(tool_name, version, output_dir="build", declared_source=None, license_
                 "status": {"exit_code": status.get("StatusCode")},
             }
         )
-        if status.get("StatusCode") != 0:
-            return {"output_dir": "", "evidence": evidence}
 
         destination = Path(output_dir).resolve() / package
         stream, _ = container.get_archive(
