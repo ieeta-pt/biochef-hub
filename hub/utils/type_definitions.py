@@ -157,6 +157,18 @@ TYPE_DEFINITIONS = [
         "output": True,
         "example": "seq\nseq1\nseq2",
     },
+    {
+        "id": "BIGBED",
+        "input": True,
+        "output": True,
+        "kind": "binary"
+    },
+    {
+        "id": "BIGWIG",
+        "input": True,
+        "output": True,
+        "kind": "binary"
+    },
 ]
 
 
