@@ -26,6 +26,15 @@ def generate_digest(file_path: str) -> str:
 
     return f"sha256:{sha256_hash.hexdigest()}"
 
+def _resolve_default_branch(owner: str, repo: str):
+    try:
+        response = requests.get(f"https://api.github.com/repos/{owner}/{repo}", timeout=10)
+        if response.status_code == 200:
+            return response.json().get("default_branch")
+    except requests.RequestException:
+        pass
+    return None
+
 def download_github_license(repo_url: str, target_path: str, license_files=None):
     parts = urlparse(repo_url).path.strip("/").split("/")
     if len(parts) < 2:
@@ -37,8 +46,18 @@ def download_github_license(repo_url: str, target_path: str, license_files=None)
     seen = set()
     candidates = [c for c in candidates if not (c in seen or seen.add(c))]
 
+    # Try the repo's actual default branch first (e.g. inab/trimal uses "trimAl"),
+    # then fall back to the common defaults.
+    branches = []
+    default_branch = _resolve_default_branch(owner, repo)
+    if default_branch:
+        branches.append(default_branch)
+    for b in ["main", "master"]:
+        if b not in branches:
+            branches.append(b)
+
     last_error = None
-    for branch in ["main", "master"]:
+    for branch in branches:
         for filename in candidates:
             raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{filename}"
             response = requests.get(raw_url)
