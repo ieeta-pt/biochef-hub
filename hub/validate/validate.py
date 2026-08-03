@@ -9,6 +9,16 @@ def validate_build_targets(field, value, error):
     if not value.get("wasm") and not value.get("native"):
         error(field, "build must define at least one of 'wasm' or 'native'")
 
+def validate_input_mode(field, value, error):
+    if value.get("mode") != "sidecar":
+        return
+
+    if not value.get("filename"):
+        error(field, "sidecar inputs must define a 'filename', since they are found by name rather than passed as an argument")
+
+    if value.get("flag"):
+        error(field, "sidecar inputs cannot define a 'flag', they are never placed on the command line")
+
 def validate_output_mode(field, value, error):
     mode = value.get("mode")
     types = value.get("types", [])
@@ -158,6 +168,7 @@ schema = {
                             'type': 'list',
                             'schema': {
                                 'type': 'dict',
+                                'check_with': validate_input_mode,
                                 'schema': {
                                     'name': {'type': 'string'},
                                     'types': {
@@ -169,7 +180,7 @@ schema = {
                                     },
                                     'mode': {
                                         'type': 'string',
-                                        'allowed': ['file', 'stdin']
+                                        'allowed': ['file', 'stdin', 'sidecar']
                                     },
                                     'flag': {
                                         'type': 'string',
