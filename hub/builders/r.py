@@ -43,10 +43,18 @@ dir.create(repo, recursive = TRUE, showWarnings = FALSE)
 
 # Refuse anything rwasm keeps a patched fork of, rather than silently
 # building the unpatched CRAN source (see the note above remotes = NULL).
-patched <- tryCatch(
-  readLines(system.file("webr-remotes", package = "rwasm")),
-  error = function(e) character(0)
-)
+#
+# This covers the references the recipe names. It does not cover a patched
+# package reached transitively, which with dependencies = "NA" is possible:
+# prefer_remotes() normally substitutes forks anywhere in the resolved tree,
+# and skipping it gives that up throughout. Catching those would mean
+# resolving the tree here before building it.
+remotes_file <- system.file("webr-remotes", package = "rwasm")
+if (!nzchar(remotes_file)) {
+  stop("rwasm is installed but its webr-remotes list is missing; ",
+       "cannot tell whether these packages need patched sources")
+}
+patched <- readLines(remotes_file)
 patched_names <- basename(sub("@.*$", "", patched))
 clash <- intersect(basename(sub("@.*$", "", sub("^[^:]+::", "", pkgs))), patched_names)
 if (length(clash) > 0) {
