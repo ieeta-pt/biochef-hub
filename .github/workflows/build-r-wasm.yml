@@ -26,6 +26,11 @@ on:
         required: false
         type: string
         default: "FALSE"
+      remotes:
+        description: "Prefer rwasm's webR-patched sources: none, or default"
+        required: false
+        type: string
+        default: "none"
   # workflow_dispatch only appears in the Actions UI once a workflow has reached
   # the default branch, so this trigger is what allows the job to be exercised
   # while it is still under review. It is scoped to this file so that unrelated
@@ -67,6 +72,7 @@ jobs:
     env:
       PKGS: ${{ inputs.packages || 'locfit' }}
       DEPS: ${{ inputs.dependencies || 'FALSE' }}
+      REMOTES: ${{ inputs.remotes || 'none' }}
       OUT_DIR: ${{ github.workspace }}/output
 
     steps:
@@ -130,11 +136,26 @@ jobs:
                            "TRUE" = TRUE, "NA" = NA, "FALSE" = FALSE,
                            stop("dependencies must be one of TRUE, NA, FALSE"))
 
+            # rwasm keeps a list of 16 packages it prefers to take from
+            # webR-patched forks rather than CRAN, and with the default
+            # remotes = NA it resolves that entire list on every call,
+            # whatever was actually asked for. That resolution currently
+            # fails in this container, taking unrelated builds down with it:
+            #   Error in "res_one_row_df(entries)" : `nrow(out)` must equal 1
+            # Passing NULL makes prefer_remotes() return early and skip it.
+            # Packages that are in the list (shiny, png, mvtnorm, rgl and so
+            # on) do want the patched sources, so this stays selectable.
+            rem <- switch(Sys.getenv("REMOTES"),
+                          "none" = NULL, "default" = NA,
+                          stop("remotes must be one of none, default"))
+
             cat("building for wasm:", paste(pkgs, collapse = ", "),
-                "( dependencies:", Sys.getenv("DEPS"), ")\n")
+                "( dependencies:", Sys.getenv("DEPS"),
+                ", remotes:", Sys.getenv("REMOTES"), ")\n")
             rwasm::add_pkg(pkgs,
                            repo_dir     = file.path(Sys.getenv("OUT_DIR"), "repo"),
-                           dependencies = deps)
+                           dependencies = deps,
+                           remotes      = rem)
           '
 
       # rwasm resolves CRAN through its own internal constant
@@ -153,6 +174,7 @@ jobs:
             echo "container_digest: sha256:3fbf3dc3537c5b31bca94dd797dc25364693b18d71b1d0975f318fbfd6269d86"
             echo "requested:        $PKGS"
             echo "dependencies:     $DEPS"
+            echo "remotes:          $REMOTES"
             echo "host_r:           $(R --version | sed -n '1p')"
             echo "target_r:         $(cat "$WEBR_ROOT/R/R-VERSION")"
             echo "emscripten:       $(emcc --version | sed -n '1p')"
