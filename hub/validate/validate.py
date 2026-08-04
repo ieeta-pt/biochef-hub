@@ -15,6 +15,23 @@ def validate_output_mode(field, value, error):
     if mode == "file" and (value.get("flag") is None and not value.get("filename")):
         error(field, "file outputs must have either a 'flag' or a 'filename' defined")
 
+
+def validate_wasm_strategy(field, value, error):
+    """Require the configuration block belonging to the declared strategy.
+
+    Each strategy reads its own sub-document, and the builder indexes into it
+    directly. Without this a recipe can name a strategy and omit its settings,
+    which validates cleanly and then fails much later in the build with a
+    KeyError naming nothing the recipe author would recognise.
+
+    'auto' is exempt: it tries biowasm first and falls back to emscripten, so
+    it is the one strategy that can legitimately carry either block.
+    """
+    strategy = value.get("strategy")
+
+    if strategy in ("emscripten", "r") and not value.get(strategy):
+        error(field, f"build.wasm declares strategy '{strategy}' but has no '{strategy}' settings")
+
 schema = {
     'apiVersion': {
         'type': 'string',
@@ -91,7 +108,41 @@ schema = {
                 'schema': {
                     'strategy': {
                         'type': 'string',
-                        'allowed': ['auto', 'biowasm', 'emscripten']
+                        'allowed': ['auto', 'biowasm', 'emscripten', 'r']
+                    },
+                    # R packages are cross-compiled to wasm by rwasm inside the
+                    # webR container, which supplies Emscripten and a
+                    # wasm-targeting LLVM flang. Unlike the C strategies this
+                    # produces no per-operation binary: the artifact is a
+                    # package library plus the R scripts that drive it, so an
+                    # operation's `bin` names a script shipped with the recipe
+                    # rather than something the build compiles.
+                    'r': {
+                        'type': 'dict',
+                        'schema': {
+                            # pkgdepends references, e.g. "ape" or
+                            # "ape@5.8.1". The first is the package an
+                            # operation script is expected to library().
+                            'packages': {
+                                'type': 'list',
+                                'schema': {'type': 'string'},
+                                'minlength': 1,
+                            },
+                            # Passed through to rwasm::add_pkg(). Its default
+                            # is FALSE, meaning dependencies are not built, so
+                            # anything with hard dependencies needs NA.
+                            'dependencies': {
+                                'type': 'string',
+                                'allowed': ['FALSE', 'NA', 'TRUE'],
+                                'required': False,
+                            },
+                            # Pins the toolchain per recipe, as
+                            # emscriptenVersion does for the emscripten
+                            # strategy. The wasm binaries are only loadable by
+                            # the webR release they were built against.
+                            'webrVersion': {'type': 'string'},
+                        },
+                        'required': False
                     },
                     'biowasm': {
                         'type': 'dict',
@@ -110,7 +161,8 @@ schema = {
                         },
                         'required': False
                     }
-                }
+                },
+                'check_with': validate_wasm_strategy
             },
             'native': {
                 'type': 'dict',
