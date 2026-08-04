@@ -11,6 +11,12 @@ import stat
 from builders.biowasm import build as build_biowasm
 from builders.emscripten import build as build_emscripten
 from builders.native import build as build_native
+from builders.r import build as build_r
+
+# Produced once per recipe by the R strategy and shared by all of its
+# operations: the package library as an Emscripten filesystem image, and the
+# index webR needs to read it.
+R_LIBRARY_ARTIFACTS = ("library.data.gz", "library.js.metadata")
 
 def reset_dir(dir_to_reset):
     if os.path.exists(dir_to_reset):
@@ -75,6 +81,10 @@ def build_wasm(recipe, recipe_dir, build_dir):
         output_dir = build_biowasm_wrapper()
     elif wasm_strategy == "emscripten":
         output_dir = build_emscripten_wrapper()
+    elif wasm_strategy == "r":
+        # No source checkout: the packages are named in the recipe and come
+        # from CRAN, so there is nothing to clone and no source tuple to pass.
+        output_dir = build_r(tool_name, wasm_settings["r"], output_dir=build_dir)
     elif wasm_strategy == "auto":
         output_dir = build_biowasm_wrapper()
         if not output_dir: output_dir = build_emscripten_wrapper()
@@ -100,6 +110,9 @@ def build_plugins(file_paths, build_dir, registry_dir):
         reset_dir(build_dir)
 
         outputs = {}
+        # The R strategy produces a different set of artifacts from the C ones,
+        # so the per-operation copying below has to know which was used.
+        wasm_strategy = recipe['build'].get('wasm', {}).get('strategy')
         build_runtimes = recipe['build'].keys()
         for runtime in build_runtimes:
             if runtime == "wasm":
@@ -140,7 +153,22 @@ def build_plugins(file_paths, build_dir, registry_dir):
                 output_dir = outputs[runtime]
                 if not output_dir: continue
 
-                if runtime == "wasm":
+                if runtime == "wasm" and wasm_strategy == "r":
+                    # An R operation has no compiled binary of its own. What it
+                    # needs is the package library, which every operation in the
+                    # recipe shares, and the script naming it in `bin`, which is
+                    # shipped with the recipe rather than produced by the build.
+                    for artifact in R_LIBRARY_ARTIFACTS:
+                        shutil.copyfile(f"{output_dir}/{artifact}", f"{runtime_dir}/{artifact}")
+
+                    script_source = Path(path).parent / bin_name
+                    if not script_source.is_file():
+                        raise FileNotFoundError(
+                            f"{recipe['name']}: operation '{operation['id']}' names the script "
+                            f"'{bin_name}', which is not in the recipe directory {script_source.parent}"
+                        )
+                    shutil.copyfile(script_source, f"{runtime_dir}/{bin_name}")
+                elif runtime == "wasm":
                     shutil.copyfile(f"{output_dir}/{bin_name}.js", f"{runtime_dir}/{bin_name}.js")
                     shutil.copyfile(f"{output_dir}/{bin_name}.wasm", f"{runtime_dir}/{bin_name}.wasm")
                 elif runtime == "native":
@@ -148,7 +176,14 @@ def build_plugins(file_paths, build_dir, registry_dir):
                     st = os.stat(f"{runtime_dir}/{bin_name}")
                     os.chmod(f"{runtime_dir}/{bin_name}", st.st_mode | stat.S_IEXEC)
 
-                if runtime == "wasm":
+                if runtime == "wasm" and wasm_strategy == "r":
+                    bundle["runtime"]["r"] = {
+                        "library_digest": generate_digest(f"{runtime_dir}/library.data.gz"),
+                        "metadata_digest": generate_digest(f"{runtime_dir}/library.js.metadata"),
+                        "script_digest": generate_digest(f"{runtime_dir}/{bin_name}"),
+                    }
+
+                elif runtime == "wasm":
                     bundle["runtime"]["wasm"] = {
                         "wasm_digest": generate_digest(f"{runtime_dir}/{bin_name}.wasm"),
                         "js_digest":generate_digest(f"{runtime_dir}/{bin_name}.js"),
