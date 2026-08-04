@@ -6,12 +6,18 @@ name: Build R packages for WebAssembly
 # Assembling that by hand is impractical, so this runs inside the prebuilt webR
 # container, which already ships the toolchain, a host R 4.6.0, and rwasm.
 #
-# The immediate question it answers: locfit has no wasm binary in any public
-# repository, and both DESeq2 and edgeR list it under Imports, so neither can be
-# loaded under webR. r-universe attempts a wasm build and records check=FAIL,
-# but its logs have expired. locfit's sources compile and link cleanly for
-# wasm32 under a stock emsdk, which suggests the failure is in the post-build
-# check rather than in the build itself. This job establishes which.
+# It produces two things: a CRAN-like repository of wasm binaries, and the
+# Emscripten virtual filesystem image that webR actually mounts to make those
+# packages importable. A repository on its own is only half the artefact.
+#
+# The case that prompted it: locfit has no wasm binary in any public
+# repository, and both DESeq2 and edgeR list it under Imports, so neither can
+# be loaded under webR. r-universe attempts a wasm build and records
+# check=FAIL, but its logs have expired. Running it here shows locfit's own
+# sources are not at fault -- it fails on the first file because emscripten-only
+# flags reach a native gcc -- which is an upstream toolchain problem rather than
+# anything this repository can fix. Build it with `packages: locfit` to
+# reproduce.
 
 on:
   workflow_dispatch:
@@ -20,7 +26,11 @@ on:
         description: "Comma-separated R package references to build for wasm"
         required: false
         type: string
-        default: "locfit"
+        # withr is pure R and digest is a small C package, both with no
+        # dependencies outside base. Between them they exercise the two paths
+        # that matter -- packaging alone, and actually driving the wasm
+        # compiler -- so the default run demonstrates the pipeline end to end.
+        default: "withr,digest"
       dependencies:
         description: "Also build dependencies: FALSE (none), NA (hard only), TRUE (all)"
         required: false
@@ -70,7 +80,7 @@ jobs:
     container: ghcr.io/r-wasm/webr@sha256:3fbf3dc3537c5b31bca94dd797dc25364693b18d71b1d0975f318fbfd6269d86
 
     env:
-      PKGS: ${{ inputs.packages || 'locfit' }}
+      PKGS: ${{ inputs.packages || 'withr,digest' }}
       DEPS: ${{ inputs.dependencies || 'FALSE' }}
       REMOTES: ${{ inputs.remotes || 'none' }}
       OUT_DIR: ${{ github.workspace }}/output
@@ -121,7 +131,7 @@ jobs:
       - name: Build the requested packages for wasm
         run: |
           set -euo pipefail
-          mkdir -p "$OUT_DIR/repo"
+          mkdir -p "$OUT_DIR/repo" "$OUT_DIR/vfs"
           Rscript --vanilla -e '
             pkgs <- trimws(strsplit(Sys.getenv("PKGS"), ",")[[1]])
             pkgs <- pkgs[nzchar(pkgs)]
@@ -158,6 +168,42 @@ jobs:
                            remotes      = rem)
           '
 
+      # A CRAN-like repository is not what webR actually mounts. To use these
+      # packages a caller needs an Emscripten virtual filesystem image -- a
+      # .data (or .data.gz) blob plus its .js.metadata index -- which is what
+      # make_vfs_library() produces from the repository. Emitting only the
+      # repository would ship half an artefact.
+      #
+      # make_library() globs the binary contrib directory and errors if it does
+      # not exist, which is the case whenever every package failed to build. In
+      # that situation the useful diagnosis is the per-package check at the end
+      # of this job, so skip quietly here rather than failing with a confusing
+      # path error and masking it.
+      - name: Package the built library as a virtual filesystem image
+        if: always()
+        run: |
+          set -euo pipefail
+          Rscript --vanilla -e '
+            # Load the namespace before reading any rwasm option: those options
+            # are set in .onLoad, so reading them first yields NULL.
+            if (!requireNamespace("rwasm", quietly = TRUE))
+              stop("rwasm is not installed in this container")
+
+            repo <- file.path(Sys.getenv("OUT_DIR"), "repo")
+            # Built binaries are .tgz. The source tarballs sitting beside them
+            # in the same repository are .tar.gz, so this matches exactly what
+            # make_library() would package, without restating its layout.
+            built <- list.files(repo, pattern = "[.]tgz$", recursive = TRUE)
+            if (length(built) == 0) {
+              message("no wasm binaries were built, so there is no library to package")
+              quit(save = "no", status = 0)
+            }
+            cat("packaging", length(built), "binaries into a filesystem image\n")
+            rwasm::make_vfs_library(out_dir  = file.path(Sys.getenv("OUT_DIR"), "vfs"),
+                                    repo_dir = repo,
+                                    compress = TRUE)
+          '
+
       # rwasm resolves CRAN through its own internal constant
       # (ppm_config$cran_mirror, the Posit Package Manager "latest" mirror) and
       # not through getOption("repos"), so the input version cannot be pinned by
@@ -181,6 +227,8 @@ jobs:
             echo "rwasm:            $(Rscript --vanilla -e 'cat(as.character(packageVersion("rwasm")))')"
             echo "built:"
             find "$OUT_DIR" -name '*.tgz' -printf '  - %f\n' 2>/dev/null | sort || true
+            echo "filesystem image:"
+            find "$OUT_DIR/vfs" -type f -printf '  - %f (%s bytes)\n' 2>/dev/null | sort || true
           } | tee "$OUT_DIR/manifest.txt"
 
       - name: Report what was produced
