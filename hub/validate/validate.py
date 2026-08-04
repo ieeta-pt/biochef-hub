@@ -32,6 +32,20 @@ def validate_wasm_strategy(field, value, error):
     if strategy in ("emscripten", "r") and not value.get(strategy):
         error(field, f"build.wasm declares strategy '{strategy}' but has no '{strategy}' settings")
 
+
+def validate_build_combination(field, value, error):
+    """Reject an R wasm build alongside a native one.
+
+    `bin` means different things to the two: a script shipped with the recipe
+    for R, a binary the build produced for native. A recipe declaring both
+    would validate, then fail in the native copy step looking for a compiled
+    artifact under the script's name.
+    """
+    wasm = value.get("wasm") or {}
+
+    if wasm.get("strategy") == "r" and value.get("native"):
+        error(field, "an R wasm build cannot be combined with a native build")
+
 schema = {
     'apiVersion': {
         'type': 'string',
@@ -102,6 +116,7 @@ schema = {
     },
     'build': {
         'type': 'dict',
+        'check_with': validate_build_combination,
         'schema': {
             'wasm': {
                 'type': 'dict',
@@ -195,7 +210,11 @@ schema = {
                 'id': {'type': 'string', 'regex': r'^[a-zA-Z0-9.]+$'},
                 'name': {'type': 'string'},
                 'category': {'type': 'string', 'required': False},
-                'bin': {'type': 'string'},
+                # Constrained to a bare filename. Under the R strategy `bin` names a
+                # script inside the contributed recipe directory and is used to build a
+                # path, so an unconstrained value would let a recipe reach outside its
+                # own directory and have the result published.
+                'bin': {'type': 'string', 'regex': r'^[A-Za-z0-9][A-Za-z0-9._-]*$'},
                 'description': {'type': 'string'},
                 'io': {
                     'type': 'dict',

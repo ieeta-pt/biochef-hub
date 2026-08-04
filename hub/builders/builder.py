@@ -181,6 +181,12 @@ def build_plugins(file_paths, build_dir, registry_dir):
                         "library_digest": generate_digest(f"{runtime_dir}/library.data.gz"),
                         "metadata_digest": generate_digest(f"{runtime_dir}/library.js.metadata"),
                         "script_digest": generate_digest(f"{runtime_dir}/{bin_name}"),
+                        # Recorded so the runtime can refuse a library built
+                        # against a different webR. These binaries are only
+                        # loadable by the release they were compiled for, and
+                        # without this the mismatch surfaces as an unattributable
+                        # error inside a worker.
+                        "webr_version": recipe['build']['wasm']['r']['webrVersion'],
                     }
 
                 elif runtime == "wasm":

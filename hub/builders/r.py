@@ -21,7 +21,11 @@ WEBR_IMAGE = "ghcr.io/r-wasm/webr:v{version}"
 #
 #  * add_pkg() resolves every reference in its built-in webr-remotes list on
 #    each call, whatever was asked for, and that resolution currently fails in
-#    this container. remotes = NULL skips it.
+#    this container. remotes = NULL skips it. That has a real cost: skipping
+#    prefer_remotes() also gives up rwasm's webR-patched forks, so any package
+#    in inst/webr-remotes (igraph, png, mvtnorm, shiny, vroom and about a dozen
+#    others) would be built from unpatched CRAN source and may misbehave under
+#    wasm. Such a package is refused below rather than built quietly.
 #  * add_pkg() reduces a failed package build to a warning and carries on, so
 #    it exits 0 having produced no binary. The requested packages are checked
 #    against what actually landed.
@@ -37,13 +41,32 @@ deps <- switch(Sys.getenv("BIOCHEF_DEPENDENCIES"),
 repo <- "/output/repo"
 dir.create(repo, recursive = TRUE, showWarnings = FALSE)
 
+# Refuse anything rwasm keeps a patched fork of, rather than silently
+# building the unpatched CRAN source (see the note above remotes = NULL).
+patched <- tryCatch(
+  readLines(system.file("webr-remotes", package = "rwasm")),
+  error = function(e) character(0)
+)
+patched_names <- basename(sub("@.*$", "", patched))
+clash <- intersect(basename(sub("@.*$", "", sub("^[^:]+::", "", pkgs))), patched_names)
+if (length(clash) > 0) {
+  stop("these packages need rwasm's webR-patched sources, which this build ",
+       "cannot use: ", paste(clash, collapse = ", "))
+}
+
 rwasm::add_pkg(pkgs, repo_dir = repo, dependencies = deps, remotes = NULL)
 
 built <- list.files(repo, pattern = "[.]tgz$", recursive = TRUE)
 if (length(built) == 0) stop("no wasm binaries were produced")
 
+# Reduce a pkgdepends reference to the package name it will be built under:
+# cran::ape -> ape, ape@5.8.1 -> ape, r-wasm/rgl@webr -> rgl,
+# url::https://host/foo_1.0.tar.gz -> foo. Without the basename() a GitHub or
+# url reference never matches its own artefact, and a build that succeeded is
+# reported as having produced nothing.
 missing <- Filter(function(p) {
-  name <- sub("^.*::", "", p); name <- sub("@.*$", "", name)
+  name <- basename(sub("@.*$", "", sub("^[^:]+::", "", p)))
+  name <- sub("_.*$", "", name)
   !any(startsWith(basename(built), paste0(name, "_")))
 }, pkgs)
 if (length(missing) > 0) {
