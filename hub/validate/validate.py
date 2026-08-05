@@ -6,6 +6,11 @@ allowed_output_types = get_allowed_output_types()
 allowed_parameter_types = ['string', 'integer', 'float', 'flag']
 
 def validate_output_mode(field, value, error):
+    # Cerberus drops `type` and `schema` for a None value but still runs
+    # check_with, so an empty list entry -- "- " with nothing after it --
+    # arrives here as None and would raise out of the validator instead of
+    # being reported as a bad recipe.
+    value = value or {}
     mode = value.get("mode")
     types = value.get("types", [])
 
@@ -43,7 +48,9 @@ def validate_build_combination(field, value, error):
     would validate, then fail in the native copy step looking for a compiled
     artifact under the script's name.
     """
-    wasm = value.get("wasm") or {}
+    # Cerberus drops `type` and `schema` for a None value but still runs
+    # check_with, so `build:` with nothing under it arrives here as None.
+    wasm = (value or {}).get("wasm") or {}
 
     if wasm.get("strategy") == "r" and value.get("native"):
         error(field, "an R wasm build cannot be combined with a native build")
