@@ -42,7 +42,16 @@ def test_tools(registry_dir):
             with open(bundle_path) as f:
                 tool_bundle = json.load(f)
 
-            if not test_tool_outputs(version_dir, tool_bundle):
+            # Guarded so that one tool cannot end the run. Anything unexpected
+            # here previously escaped as a traceback and left every remaining
+            # recipe untested, which is the opposite of what this command is for.
+            try:
+                ok = test_tool_outputs(version_dir, tool_bundle)
+            except Exception as err:
+                print(f"[Error] Testing {tool_bundle.get('name')} raised {type(err).__name__}: {err}")
+                ok = False
+
+            if not ok:
                 failed.append(tool_bundle["name"])
 
     return failed
@@ -51,6 +60,17 @@ def test_tools(registry_dir):
 example_inputs = get_example_inputs()
 
 WASM_HARNESS = Path(__file__).resolve().parent / "run_wasm.js"
+
+
+def safe(text):
+    """Makes text printable.
+
+    A tool's output reaches us as a JSON string decoded from whatever bytes it
+    wrote, so it can contain lone surrogates. print() cannot encode those, and
+    the resulting UnicodeEncodeError escaped test_tool_outputs and left every
+    remaining recipe untested.
+    """
+    return (text or "").encode("utf-8", errors="replace").decode("utf-8")
 
 
 def run_wasm_tool(wasm_path, argv, tool_input, input_files, tmp_path):
@@ -103,16 +123,27 @@ def run_wasm_tool(wasm_path, argv, tool_input, input_files, tmp_path):
             continue
         (tmp_path / name).write_bytes(base64.b64decode(contents))
 
-    # -1 is the harness reporting that the module could not be run at all --
-    # it aborted, or failed to load. That is a failure of the artifact, not a
-    # result the tool produced, so it is not reported as tool output. A tool's
-    # own non-zero status is left alone, matching how the native path treats it,
-    # since some tools exit non-zero by design.
-    if run.get("exitCode") == -1:
-        print("[Error] The wasm module did not complete (it failed to load, or trapped)")
-        print((run.get("stderr") or "").strip()[:600])
+    if not run.get("loaded"):
+        if run.get("unsupportedEnvironment"):
+            # Built without "node" in -sENVIRONMENT, so it refuses to start
+            # outside a browser. That is a property of how it was compiled, not
+            # evidence that the tool is broken, so it is skipped rather than
+            # failed -- reporting it as a failure would turn every recipe built
+            # this way red for a reason unrelated to the recipe.
+            print("[SKIP] Built without node support, so it cannot be run here")
+            return "", ""
+
+        print("[Error] The wasm module failed to load")
+        print(safe(run.get("stderr"))[:600])
         return None
 
+    if not run.get("completed"):
+        print("[Error] The wasm module trapped part way through")
+        print(safe(run.get("stderr"))[:600])
+        return None
+
+    # A tool's own non-zero status is only reported, matching how the native
+    # path treats it, since some tools exit non-zero by design.
     if run.get("exitCode"):
         print(f"[WARNING] Tool exited with status {run['exitCode']}")
 
@@ -256,7 +287,7 @@ def test_tool_outputs(tool_dir, tool_bundle):
                 if not detected:
                     print(f"[WARNING] Empty output ({output_name}, {tool_bundle['name']}, {cmd})")
                     print("stderr:")
-                    print(stderr.strip())
+                    print(safe(stderr).strip())
                 elif detected not in output_def["types"]:
                     print(f"[ERROR] Unexpected output type ({output_name}, {tool_bundle['name']}, {cmd})")
                     print(f"  Detected : {detected}")

@@ -10,7 +10,12 @@
 // Python side does not have to know anything about Emscripten:
 //
 //   spec   { argv: [], stdin: "", files: { name: base64 } }
-//   result { exitCode, stdout, stderr, files: { name: base64 } }
+//   result { loaded, completed, exitCode, stdout, stderr, files: { name: base64 } }
+//
+// loaded=false means the module would not start at all -- most often because it
+// was built without "node" in -sENVIRONMENT. completed=false means it started
+// and then trapped. Neither is expressible as an exit status, because a tool
+// returning -1 to reject its arguments is ordinary.
 //
 // Every regular file left in the working directory is returned, not a named
 // list: the caller does not tell the tool where to write, it looks afterwards
@@ -28,7 +33,13 @@ async function main() {
   }
 
   const spec = JSON.parse(fs.readFileSync(specPath, "utf8"));
-  const factory = require(path.resolve(modulePath));
+  const resolved = path.resolve(modulePath);
+  const factory = require(resolved);
+
+  // Handed over rather than left for the module to fetch. A module built for
+  // the browser resolves its .wasm with fetch or XHR, neither of which exists
+  // here.
+  const wasmBinary = fs.readFileSync(resolved.replace(/\.js$/, ".wasm"));
 
   let stdout = "";
   let stderr = "";
@@ -37,7 +48,10 @@ async function main() {
   const stdinBytes = Buffer.from(spec.stdin ?? "", "utf8");
   let stdinPos = 0;
 
-  const Module = await factory({
+  let Module;
+  try {
+    Module = await factory({
+      wasmBinary,
     // The recipes are built with INVOKE_RUN=0, so main is called explicitly
     // below once the input files are in place.
     noInitialRun: true,
@@ -47,14 +61,30 @@ async function main() {
     printErr: (line) => {
       stderr += line + "\n";
     },
-    stdin: () => (stdinPos < stdinBytes.length ? stdinBytes[stdinPos++] : null),
-  });
+      stdin: () => (stdinPos < stdinBytes.length ? stdinBytes[stdinPos++] : null),
+    });
+  } catch (err) {
+    // A module built without "node" in -sENVIRONMENT refuses to start here. That
+    // says nothing about whether the tool works, so it is reported as its own
+    // outcome rather than as a failure -- the caller decides what to do with it.
+    const message = String((err && err.message) || err);
+    const unsupported = /not compiled for this environment|not enabled at build time/.test(message);
+    process.stdout.write(JSON.stringify({
+      loaded: false,
+      unsupportedEnvironment: unsupported,
+      stdout: "",
+      stderr: message,
+      files: {},
+    }));
+    return;
+  }
 
   for (const [name, contents] of Object.entries(spec.files ?? {})) {
     Module.FS.writeFile(name, Buffer.from(contents, "base64"));
   }
 
   let exitCode = 0;
+  let completed = true;
   try {
     // callMain returns main's value. It does not throw for a normal return,
     // even with EXIT_RUNTIME=1 -- reading the status from a thrown ExitStatus
@@ -62,13 +92,14 @@ async function main() {
     const status = Module.callMain(spec.argv ?? []);
     if (typeof status === "number") exitCode = status;
   } catch (err) {
-    // A program that calls exit() rather than returning does throw.
     if (err && err.name === "ExitStatus") {
+      // A program that calls exit() rather than returning does throw.
       exitCode = err.status;
     } else {
-      // -1 is reserved for "the module did not complete": a load failure, or a
-      // trap or abort part way through.
-      exitCode = -1;
+      // Reported in its own field. Overloading a status value cannot work:
+      // "return -1" is an ordinary way for a tool to reject its arguments, and
+      // would be indistinguishable from a trap.
+      completed = false;
       stderr += String((err && err.message) || err) + "\n";
     }
   }
@@ -88,14 +119,15 @@ async function main() {
     }
   }
 
-  process.stdout.write(JSON.stringify({ exitCode, stdout, stderr, files }));
+  process.stdout.write(JSON.stringify({ loaded: true, completed, exitCode, stdout, stderr, files }));
 }
 
 main().catch((err) => {
   // Reported in the same shape as a normal result so the caller has one path.
   process.stdout.write(
     JSON.stringify({
-      exitCode: -1,
+      loaded: false,
+      unsupportedEnvironment: false,
       stdout: "",
       stderr: String((err && err.stack) || err),
       files: {},
