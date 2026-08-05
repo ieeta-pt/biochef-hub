@@ -5,12 +5,27 @@ import tarfile
 import io
 
 IMAGE_NAME = "biochef-biowasm-builder"
-bclient = docker.from_env()
+_bclient = None
+
+
+def get_client():
+    """Connects to Docker on first use.
+
+    Connecting at import time made every build require a running daemon,
+    including recipes built with the emscripten strategy, which never touch
+    Docker: builder.py imports this module unconditionally, so `hub build` on
+    such a recipe failed with "Error while fetching server API version" before
+    reaching any of its own code.
+    """
+    global _bclient
+    if _bclient is None:
+        _bclient = docker.from_env()
+    return _bclient
 BUILDERS_DIR = Path(__file__).resolve().parent
 
 def image_exists():
     try:
-        bclient.images.get(IMAGE_NAME)
+        get_client().images.get(IMAGE_NAME)
         return True
     except docker.errors.ImageNotFound:
         return False
@@ -19,7 +34,7 @@ def image_exists():
 def build_image(dockerfile_dir=".", dockerfile_name="Dockerfile"):
     print("Building Biowasm Docker image...")
 
-    image, logs = bclient.images.build(
+    image, logs = get_client().images.build(
         path=dockerfile_dir,
         dockerfile=dockerfile_name,
         tag=IMAGE_NAME,
@@ -67,7 +82,7 @@ def build(tool_name, version, output_dir="build"):
     output_dir = Path(output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    container = bclient.containers.run(
+    container = get_client().containers.run(
         image=IMAGE_NAME,
         user=f"{os.getuid()}:{os.getgid()}",
         working_dir="/biowasm",
