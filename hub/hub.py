@@ -73,11 +73,13 @@ def test_cmd(args):
     failed_tests = test_tools(REGISTRY_DIR)
     
     if len(failed_tests) > 0:
+        # Exits non-zero so the failure reaches CI. Without this the result was
+        # printed and the command still succeeded, so a failing tool could not
+        # stop anything.
         print(f"The following tools failed the tests: {failed_tests}")
-    else:
-        print("All tests passed")
-        
-    pass
+        raise SystemExit(1)
+
+    print("All tests passed")
 
 def sbom_cmd(args):
     #TODO
