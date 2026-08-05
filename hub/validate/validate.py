@@ -6,6 +6,11 @@ allowed_output_types = get_allowed_output_types()
 allowed_parameter_types = ['string', 'integer', 'float', 'flag']
 
 def validate_output_mode(field, value, error):
+    # Cerberus drops `type` and `schema` for a None value but still runs
+    # check_with, so an empty list entry -- "- " with nothing after it --
+    # arrives here as None and would raise out of the validator instead of
+    # being reported as a bad recipe.
+    value = value or {}
     mode = value.get("mode")
     types = value.get("types", [])
 
@@ -27,10 +32,28 @@ def validate_wasm_strategy(field, value, error):
     'auto' is exempt: it tries biowasm first and falls back to emscripten, so
     it is the one strategy that can legitimately carry either block.
     """
-    strategy = value.get("strategy")
+    # `build.wasm:` with nothing under it parses as None, which would raise an
+    # AttributeError out of the validator rather than reporting a bad recipe.
+    strategy = (value or {}).get("strategy")
 
     if strategy in ("emscripten", "r") and not value.get(strategy):
         error(field, f"build.wasm declares strategy '{strategy}' but has no '{strategy}' settings")
+
+
+def validate_build_combination(field, value, error):
+    """Reject an R wasm build alongside a native one.
+
+    `bin` means different things to the two: a script shipped with the recipe
+    for R, a binary the build produced for native. A recipe declaring both
+    would validate, then fail in the native copy step looking for a compiled
+    artifact under the script's name.
+    """
+    # Cerberus drops `type` and `schema` for a None value but still runs
+    # check_with, so `build:` with nothing under it arrives here as None.
+    wasm = (value or {}).get("wasm") or {}
+
+    if wasm.get("strategy") == "r" and value.get("native"):
+        error(field, "an R wasm build cannot be combined with a native build")
 
 schema = {
     'apiVersion': {
@@ -102,6 +125,7 @@ schema = {
     },
     'build': {
         'type': 'dict',
+        'check_with': validate_build_combination,
         'schema': {
             'wasm': {
                 'type': 'dict',
@@ -195,7 +219,14 @@ schema = {
                 'id': {'type': 'string', 'regex': r'^[a-zA-Z0-9.]+$'},
                 'name': {'type': 'string'},
                 'category': {'type': 'string', 'required': False},
-                'bin': {'type': 'string'},
+                # Constrained to a bare filename. Under the R strategy `bin` names a
+                # script inside the contributed recipe directory and is used to build a
+                # path, so an unconstrained value would let a recipe reach outside its
+                # own directory and have the result published.
+                'bin': {'type': 'string', 'maxlength': 128,
+                        # \A and \Z rather than ^ and $: Python's $ also matches
+                        # before a trailing newline, so "summary.R\n" would pass.
+                        'regex': r'\A[A-Za-z0-9][A-Za-z0-9._-]*\Z'},
                 'description': {'type': 'string'},
                 'io': {
                     'type': 'dict',
