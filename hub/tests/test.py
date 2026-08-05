@@ -95,9 +95,11 @@ def run_wasm_tool(wasm_path, argv, tool_input, input_files, tmp_path):
         return None
 
     for name, contents in run.get("files", {}).items():
-        # Inputs are already on disk; writing them back would be pointless and
-        # would let a tool overwrite what it was given.
-        if name in input_files or name == spec_path.name:
+        # Inputs are written back too. A tool editing its input in place is a
+        # normal pattern, and under the native runtime it writes straight into
+        # this directory, so skipping them here would make the two runtimes
+        # disagree about what the tool produced.
+        if name == spec_path.name:
             continue
         (tmp_path / name).write_bytes(base64.b64decode(contents))
 
@@ -107,7 +109,7 @@ def run_wasm_tool(wasm_path, argv, tool_input, input_files, tmp_path):
     # own non-zero status is left alone, matching how the native path treats it,
     # since some tools exit non-zero by design.
     if run.get("exitCode") == -1:
-        print("[Error] The wasm module could not be run")
+        print("[Error] The wasm module did not complete (it failed to load, or trapped)")
         print((run.get("stderr") or "").strip()[:600])
         return None
 

@@ -56,13 +56,18 @@ async function main() {
 
   let exitCode = 0;
   try {
-    Module.callMain(spec.argv ?? []);
+    // callMain returns main's value. It does not throw for a normal return,
+    // even with EXIT_RUNTIME=1 -- reading the status from a thrown ExitStatus
+    // alone would report every tool as having exited 0.
+    const status = Module.callMain(spec.argv ?? []);
+    if (typeof status === "number") exitCode = status;
   } catch (err) {
-    // EXIT_RUNTIME=1 means returning from main throws ExitStatus rather than
-    // returning normally, including on success.
+    // A program that calls exit() rather than returning does throw.
     if (err && err.name === "ExitStatus") {
       exitCode = err.status;
     } else {
+      // -1 is reserved for "the module did not complete": a load failure, or a
+      // trap or abort part way through.
       exitCode = -1;
       stderr += String((err && err.message) || err) + "\n";
     }
