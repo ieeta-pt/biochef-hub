@@ -186,6 +186,7 @@ def test_tool_outputs(tool_dir, tool_bundle):
 
             tool_input = ""
             input_files = []
+            expected_outputs = {}
             cmd = [str(bin_path)] if runtime == "native" else []
 
             # Parameters
@@ -233,6 +234,32 @@ def test_tool_outputs(tool_dir, tool_bundle):
                     print(f"[TODO] Unsupported input mode: {input_def}")
                     return False
 
+            # Outputs. Nothing previously told a tool where to write, so any
+            # operation whose output is a file could only ever report that the
+            # file was missing -- 45 of the 186 declared outputs. The shape
+            # follows what the frontend does when it builds an invocation: a
+            # flag and a target, or a bare target when the flag is empty.
+            trailing = []
+            for output_def in tool_bundle["io"]["outputs"]:
+                if output_def.get("mode") != "file":
+                    continue
+
+                flag = output_def.get("flag")
+                if flag is None:
+                    # No way to say where it should go; the tool decides.
+                    continue
+
+                target = output_def.get("filename") or f"{output_def['name']}.txt"
+                expected_outputs[output_def["name"]] = target
+
+                if flag == "":
+                    trailing.append(target)
+                else:
+                    cmd.append(flag)
+                    cmd.append(target)
+
+            cmd.extend(trailing)
+
             # Run tool
             print(f"Testing tool {tool_bundle['name']} ({runtime}) with command {cmd}")
             if runtime == "wasm":
@@ -266,10 +293,19 @@ def test_tool_outputs(tool_dir, tool_bundle):
 
                 elif output_def["mode"] == "file":
                     matched = None
-                    for f in tmp_path.iterdir():
-                        if f.is_file() and f.stem.lower() == output_name.lower():
-                            matched = f
-                            break
+
+                    # The name the tool was told to write, when it was told.
+                    asked_for = expected_outputs.get(output_name)
+                    if asked_for and (tmp_path / asked_for).is_file():
+                        matched = tmp_path / asked_for
+
+                    # Otherwise fall back to guessing, which is all that was
+                    # possible before the tool was given a target.
+                    if not matched:
+                        for f in tmp_path.iterdir():
+                            if f.is_file() and f.stem.lower() == output_name.lower():
+                                matched = f
+                                break
 
                     if not matched:
                         print("[WARNING] Output file not found")
