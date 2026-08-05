@@ -187,6 +187,12 @@ def test_tool_outputs(tool_dir, tool_bundle):
             tool_input = ""
             input_files = []
             expected_outputs = {}
+            # Arguments with no flag are held back and appended after every
+            # flagged one, which is what the frontend does. Emitting a bare
+            # filename first makes a getopt-style parser stop scanning, so the
+            # flags that follow are never seen: tn93 given "in.txt -o out.txt"
+            # prints its usage and exits 1, and given "-o out.txt in.txt" runs.
+            trailing = []
             cmd = [str(bin_path)] if runtime == "native" else []
 
             # Parameters
@@ -228,7 +234,12 @@ def test_tool_outputs(tool_dir, tool_bundle):
 
                     # A wasm tool sees its own virtual filesystem, where the
                     # host path means nothing.
-                    cmd.append(file_name if runtime == "wasm" else str(file_path))
+                    argument = file_name if runtime == "wasm" else str(file_path)
+
+                    if input_def.get("flag"):
+                        cmd.append(argument)
+                    else:
+                        trailing.append(argument)
 
                 else:
                     print(f"[TODO] Unsupported input mode: {input_def}")
@@ -239,7 +250,6 @@ def test_tool_outputs(tool_dir, tool_bundle):
             # file was missing -- 45 of the 186 declared outputs. The shape
             # follows what the frontend does when it builds an invocation: a
             # flag and a target, or a bare target when the flag is empty.
-            trailing = []
             for output_def in tool_bundle["io"]["outputs"]:
                 if output_def.get("mode") != "file":
                     continue
