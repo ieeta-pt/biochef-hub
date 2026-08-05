@@ -27,7 +27,9 @@ def validate_wasm_strategy(field, value, error):
     'auto' is exempt: it tries biowasm first and falls back to emscripten, so
     it is the one strategy that can legitimately carry either block.
     """
-    strategy = value.get("strategy")
+    # `build.wasm:` with nothing under it parses as None, which would raise an
+    # AttributeError out of the validator rather than reporting a bad recipe.
+    strategy = (value or {}).get("strategy")
 
     if strategy in ("emscripten", "r") and not value.get(strategy):
         error(field, f"build.wasm declares strategy '{strategy}' but has no '{strategy}' settings")
@@ -214,7 +216,10 @@ schema = {
                 # script inside the contributed recipe directory and is used to build a
                 # path, so an unconstrained value would let a recipe reach outside its
                 # own directory and have the result published.
-                'bin': {'type': 'string', 'regex': r'^[A-Za-z0-9][A-Za-z0-9._-]*$'},
+                'bin': {'type': 'string', 'maxlength': 128,
+                        # \A and \Z rather than ^ and $: Python's $ also matches
+                        # before a trailing newline, so "summary.R\n" would pass.
+                        'regex': r'\A[A-Za-z0-9][A-Za-z0-9._-]*\Z'},
                 'description': {'type': 'string'},
                 'io': {
                     'type': 'dict',

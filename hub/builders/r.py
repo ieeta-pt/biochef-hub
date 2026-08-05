@@ -55,8 +55,18 @@ if (!nzchar(remotes_file)) {
        "cannot tell whether these packages need patched sources")
 }
 patched <- readLines(remotes_file)
-patched_names <- basename(sub("@.*$", "", patched))
-clash <- intersect(basename(sub("@.*$", "", sub("^[^:]+::", "", pkgs))), patched_names)
+# One normaliser for both checks. They previously differed by the _version
+# strip, so a url:: reference reduced to "igraph_2.0.3.tar.gz" here and to
+# "igraph" below, and slipped past the clash check it should have failed.
+pkg_name <- function(refs) {
+  name <- sub("^[^:]+::", "", refs)
+  name <- sub("@.*$", "", name)
+  name <- basename(name)
+  sub("_.*$", "", name)
+}
+
+patched_names <- pkg_name(patched)
+clash <- intersect(pkg_name(pkgs), patched_names)
 if (length(clash) > 0) {
   stop("these packages need rwasm's webR-patched sources, which this build ",
        "cannot use: ", paste(clash, collapse = ", "))
@@ -73,9 +83,7 @@ if (length(built) == 0) stop("no wasm binaries were produced")
 # url reference never matches its own artefact, and a build that succeeded is
 # reported as having produced nothing.
 missing <- Filter(function(p) {
-  name <- basename(sub("@.*$", "", sub("^[^:]+::", "", p)))
-  name <- sub("_.*$", "", name)
-  !any(startsWith(basename(built), paste0(name, "_")))
+  !any(startsWith(basename(built), paste0(pkg_name(p), "_")))
 }, pkgs)
 if (length(missing) > 0) {
   stop(paste("no wasm binary was produced for:", paste(missing, collapse = ", ")))
