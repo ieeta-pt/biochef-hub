@@ -63,7 +63,12 @@ def build(tool_name, recipe_dir, emscripten_settings, source, output_dir="build"
         "-s FORCE_FILESYSTEM=1 "
         "-s EXPORTED_RUNTIME_METHODS=['callMain','FS','PROXYFS','WORKERFS'] "
         "-s MODULARIZE=1 "
-        "-s ENVIRONMENT=web,worker "
+        # node is included so that hub test can execute the artifact. Without
+        # it the module refuses to load outside a browser ("not compiled for
+        # this environment"), which is why wasm-only recipes could only ever be
+        # skipped. It costs about 3 KB of JS shim and changes nothing for the
+        # browser targets.
+        "-s ENVIRONMENT=web,worker,node "
         "-s ALLOW_MEMORY_GROWTH=1 "
         "-s EXIT_RUNTIME=1 "
         "-lworkerfs.js "
