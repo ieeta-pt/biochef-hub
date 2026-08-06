@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -58,7 +58,6 @@ def generate_sign_and_publish_catalog(
     catalog_version: str | None = None,
     channel: str = "latest",
     sequence: int | None = None,
-    expires_days: int = 30,
     private_jwk_path: str | Path | None = None,
     private_jwk_json: str | None = None,
 ) -> CatalogSummary:
@@ -67,8 +66,6 @@ def generate_sign_and_publish_catalog(
         raise CatalogError(f"Registry directory does not exist: {registry_path}")
     if not signing_policy_path:
         raise CatalogError("A signing policy is required")
-    if expires_days < 1:
-        raise CatalogError("expires_days must be at least 1")
 
     results_path = Path(publish_results_path or registry_path / "publish-results.json").resolve()
     report_path = Path(verification_report_path or registry_path / "signing-verification-report.json").resolve()
@@ -118,7 +115,6 @@ def generate_sign_and_publish_catalog(
     catalog = {
         "schema": CATALOG_SCHEMA,
         "generated_at": generated_at.isoformat(),
-        "expires_at": (generated_at + timedelta(days=expires_days)).isoformat(),
         "channel": channel,
         "version": version,
         "sequence": next_sequence,
@@ -460,14 +456,6 @@ def _validate_existing_catalog(
     sequence = catalog.get("sequence")
     if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 1:
         raise CatalogError("Existing catalog sequence is invalid")
-    expires_at = catalog.get("expires_at")
-    try:
-        expiry = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise CatalogError("Existing catalog expiry is invalid") from exc
-    if expiry.tzinfo is None:
-        raise CatalogError("Existing catalog expiry must include a timezone")
-
     expected_policy = {
         "digest": f"sha256:{sha256_hex(policy_path)}",
         "certificate_identity": signing_policy.get("certificate_identity"),

@@ -4,6 +4,7 @@ on:
   workflow_call:
     inputs:
       registry_url:
+        description: "Production registry hostname without a URL scheme or path (for example, registry.biochef.app)."
         required: true
         type: string
       recipes:
@@ -137,6 +138,8 @@ jobs:
     if: inputs.publish
     needs: build
     runs-on: ubuntu-latest
+    outputs:
+      slsa_subjects_handle: ${{ steps.slsa_subjects.outputs.handle }}
     concurrency:
       group: biochef-catalog-${{ inputs.registry_url }}-${{ inputs.package_prefix }}
       cancel-in-progress: false
@@ -215,10 +218,9 @@ jobs:
           REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
           REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
         run: |
-          REGISTRY_HOST="${REGISTRY_URL#http://}"
-          REGISTRY_HOST="${REGISTRY_HOST#https://}"
-          REGISTRY_HOST="${REGISTRY_HOST%%/*}"
-          echo "$REGISTRY_PASSWORD" | docker login "$REGISTRY_HOST" -u "$REGISTRY_USERNAME" --password-stdin
+          echo "$REGISTRY_PASSWORD" | docker login "$REGISTRY_URL" \
+            --username "$REGISTRY_USERNAME" \
+            --password-stdin
 
       - name: Sign and attest published bundles
         env:
@@ -228,9 +230,7 @@ jobs:
           python ./.hub/hub/hub.py sign-attest \
             --registry-dir "$REGISTRY_DIR" \
             --publish-results "$REGISTRY_DIR/publish-results.json" \
-            --policy "$SIGNING_POLICY" \
-            --max-attempts 4 \
-            --retry-delay-seconds 5
+            --policy "$SIGNING_POLICY"
 
       - name: Verify published signatures and attestations
         env:
@@ -241,6 +241,340 @@ jobs:
             --publish-results "$REGISTRY_DIR/publish-results.json" \
             --policy "$SIGNING_POLICY" \
             --report "$REGISTRY_DIR/signing-verification-report.json"
+
+      - name: Prepare isolated SLSA provenance subjects
+        run: |
+          SUBJECTS_RAW="$REGISTRY_DIR/slsa-subjects.sha256"
+          SUBJECTS_BASE64="$REGISTRY_DIR/slsa-subjects.sha256.base64"
+          jq -r '
+            .artifacts[]
+            | (.version_digest | ltrimstr("sha256:")) as $digest
+            | (.digest_reference | split("@")[0]) as $name
+            | "\($digest) \($name)"
+            ' "$REGISTRY_DIR/publish-results.json" > "$SUBJECTS_RAW"
+          test -s "$SUBJECTS_RAW"
+          base64 -w0 "$SUBJECTS_RAW" > "$SUBJECTS_BASE64"
+          test -s "$SUBJECTS_BASE64"
+
+      - name: Transfer SLSA subjects through a verified artifact
+        id: slsa_subjects
+        uses: slsa-framework/slsa-github-generator/actions/generator/generic/create-base64-subjects-from-file@v2.1.0
+        with:
+          path: ${{ env.REGISTRY_DIR }}/slsa-subjects.sha256.base64
+
+      - name: Transfer immutable publication metadata
+        uses: actions/upload-artifact@v7
+        with:
+          name: biochef-slsa-publish-results
+          path: ${{ env.REGISTRY_DIR }}/publish-results.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Transfer verified BioCHEF publication state
+        if: inputs.publish_catalog
+        uses: actions/upload-artifact@v7
+        with:
+          name: biochef-verified-publication-state
+          path: |
+            ${{ env.REGISTRY_DIR }}/publish-results.json
+            ${{ env.REGISTRY_DIR }}/signing-verification-report.json
+            ${{ env.REGISTRY_DIR }}/*/*/bundle.json
+            ${{ env.REGISTRY_DIR }}/*/*/sbom.cdx.json
+            ${{ env.REGISTRY_DIR }}/*/*/build-evidence.json
+            ${{ env.REGISTRY_DIR }}/*/*/provenance.slsa.json
+          if-no-files-found: error
+          retention-days: 7
+
+  slsa_provenance:
+    if: inputs.publish
+    needs: publish
+    permissions:
+      actions: read
+      contents: write
+      id-token: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects-as-file: ${{ needs.publish.outputs.slsa_subjects_handle }}
+      provenance-name: biochef-bundles.intoto.jsonl
+      upload-assets: false
+
+  verify_and_distribute_slsa_provenance:
+    if: inputs.publish
+    needs: [build, publish, slsa_provenance]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: biochef-catalog-${{ inputs.registry_url }}-${{ inputs.package_prefix }}
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: write
+    env:
+      PROVENANCE_ARTIFACT_TYPE: application/vnd.dev.sigstore.bundle.v0.3+json
+      REGISTRY_DIR: registry
+
+    steps:
+      - name: Download immutable publication metadata
+        uses: actions/download-artifact@v8
+        with:
+          name: biochef-slsa-publish-results
+          path: slsa-publication
+
+      - name: Download isolated SLSA provenance
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.slsa_provenance.outputs.provenance-name }}
+          path: slsa-provenance
+
+      - name: Install SLSA verifier
+        uses: slsa-framework/slsa-verifier/actions/installer@v2.7.1
+
+      - name: Install ORAS
+        uses: oras-project/setup-oras@v2.0.1
+        with:
+          version: 1.3.1
+
+      - name: Authenticate to registry
+        env:
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+          REGISTRY_URL: ${{ inputs.registry_url }}
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+        run: |
+          echo "$REGISTRY_PASSWORD" | oras login "$REGISTRY_URL" \
+            --username "$REGISTRY_USERNAME" \
+            --password-stdin
+
+      - name: Verify isolated SLSA provenance
+        env:
+          PROVENANCE_NAME: ${{ needs.slsa_provenance.outputs.provenance-name }}
+        run: |
+          PROVENANCE_PATH="slsa-provenance/$PROVENANCE_NAME"
+          MANIFEST_DIR="slsa-publication/oci-manifests"
+          VERIFIED_STATEMENT_PATH="slsa-publication/verified-slsa-statement.json"
+          EXPECTED_SOURCE_URI="git+${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}@${GITHUB_REF}"
+          workflow_ref_without_owner="${GITHUB_WORKFLOW_REF#*/}"
+          workflow_ref_without_repository="${workflow_ref_without_owner#*/}"
+          EXPECTED_ENTRYPOINT="${workflow_ref_without_repository%@*}"
+          source_ref_args=()
+          case "$GITHUB_REF_TYPE" in
+            branch)
+              source_ref_args=(--source-branch "$GITHUB_REF_NAME")
+              ;;
+            tag)
+              source_ref_args=(--source-tag "$GITHUB_REF_NAME")
+              ;;
+            *)
+              echo "Unsupported source ref type: $GITHUB_REF_TYPE" >&2
+              exit 1
+              ;;
+          esac
+          test -s "$PROVENANCE_PATH"
+          mkdir -p "$MANIFEST_DIR"
+
+          mapfile -t references < <(
+            jq -er '.artifacts[].digest_reference' \
+              slsa-publication/publish-results.json
+          )
+          test "${#references[@]}" -gt 0
+
+          for reference in "${references[@]}"; do
+            subject_name="${reference%@*}"
+            subject_digest="${reference##*@}"
+            if [[ ! "$subject_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "Unsupported immutable OCI digest: $reference" >&2
+              exit 1
+            fi
+
+            digest_hex="${subject_digest#sha256:}"
+            manifest_path="$MANIFEST_DIR/$digest_hex.manifest.json"
+            statement_path="$MANIFEST_DIR/$digest_hex.verified-statement.json"
+
+            oras manifest fetch --output "$manifest_path" "$reference"
+            printf '%s  %s\n' "$digest_hex" "$manifest_path" \
+              | sha256sum --check --strict -
+
+            slsa-verifier verify-artifact "$manifest_path" \
+              --provenance-path "$PROVENANCE_PATH" \
+              --source-uri "github.com/$GITHUB_REPOSITORY" \
+              --builder-id "https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@refs/tags/v2.1.0" \
+              "${source_ref_args[@]}" \
+              --print-provenance > "$statement_path"
+
+            jq -e \
+              --arg name "$subject_name" \
+              --arg digest "$digest_hex" \
+              'any(.subject[]?; .name == $name and .digest.sha256 == $digest)' \
+              "$statement_path" > /dev/null
+
+            jq -e \
+              --arg commit "$GITHUB_SHA" \
+              --arg entrypoint "$EXPECTED_ENTRYPOINT" \
+              --arg source_uri "$EXPECTED_SOURCE_URI" \
+              '._type == "https://in-toto.io/Statement/v0.1"
+                and .predicateType == "https://slsa.dev/provenance/v0.2"
+                and .predicate.buildType == "https://github.com/slsa-framework/slsa-github-generator/generic@v1"
+                and .predicate.metadata.completeness.parameters == true
+                and .predicate.invocation.configSource.uri == $source_uri
+                and .predicate.invocation.configSource.digest.sha1 == $commit
+                and .predicate.invocation.configSource.entryPoint == $entrypoint
+                and .predicate.invocation.environment.github_sha1 == $commit
+                and ((.predicate.invocation.parameters.event_inputs // {})
+                  == (.predicate.invocation.environment.github_event_payload.inputs // {}))
+                and any(.predicate.materials[]?;
+                  .uri == $source_uri and .digest.sha1 == $commit)' \
+              "$statement_path" > /dev/null
+
+            if [ ! -e "$VERIFIED_STATEMENT_PATH" ]; then
+              cp "$statement_path" "$VERIFIED_STATEMENT_PATH"
+            else
+              cmp "$VERIFIED_STATEMENT_PATH" "$statement_path"
+            fi
+          done
+
+          test -s "$VERIFIED_STATEMENT_PATH"
+
+      - name: Attach verified SLSA provenance to every OCI subject
+        env:
+          PROVENANCE_NAME: ${{ needs.slsa_provenance.outputs.provenance-name }}
+        run: |
+          PROVENANCE_PATH="slsa-provenance/$PROVENANCE_NAME"
+          REPORT_PATH="slsa-publication/slsa-verification-report.json"
+          VERIFIED_STATEMENT_PATH="slsa-publication/verified-slsa-statement.json"
+          PROVENANCE_SHA256=$(sha256sum "$PROVENANCE_PATH" | cut -d ' ' -f 1)
+          VERIFIED_STATEMENT_SHA256=$(sha256sum "$VERIFIED_STATEMENT_PATH" | cut -d ' ' -f 1)
+          jq -n \
+            --arg provenance_digest "sha256:$PROVENANCE_SHA256" \
+            --arg source_commit "$GITHUB_SHA" \
+            --arg source_ref "$GITHUB_REF" \
+            --arg source_repository "github.com/$GITHUB_REPOSITORY" \
+            --arg source_workflow "$GITHUB_WORKFLOW_REF" \
+            --arg verified_statement_digest "sha256:$VERIFIED_STATEMENT_SHA256" \
+            '{
+              schema: "biochef.slsa-verification-report.v1",
+              provenance_digest: $provenance_digest,
+              verified_statement_digest: $verified_statement_digest,
+              verification_mode: "slsa-verifier verify-artifact",
+              source_repository: $source_repository,
+              source_ref: $source_ref,
+              source_commit: $source_commit,
+              source_workflow: $source_workflow,
+              builder_id: "https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@refs/tags/v2.1.0",
+              artifacts: []
+            }' > "$REPORT_PATH"
+
+          while IFS= read -r reference; do
+            subject_digest="${reference##*@}"
+            attachment=$(oras attach \
+              --artifact-type "$PROVENANCE_ARTIFACT_TYPE" \
+              --annotation "dev.biochef.provenance.generator=slsa-github-generator-v2.1.0" \
+              --format json \
+              "$reference" \
+              "$PROVENANCE_PATH:$PROVENANCE_ARTIFACT_TYPE")
+            attachment_ref=$(jq -er '.reference' <<< "$attachment")
+            oras manifest fetch "$attachment_ref" | jq -e \
+              --arg digest "$subject_digest" \
+              --arg artifact_type "$PROVENANCE_ARTIFACT_TYPE" \
+              '.subject.digest == $digest and .artifactType == $artifact_type' \
+              > /dev/null
+
+            report_tmp="${REPORT_PATH}.tmp"
+            jq \
+              --arg attachment_ref "$attachment_ref" \
+              --arg reference "$reference" \
+              '.artifacts += [{
+                subject: $reference,
+                provenance_verification: "passed",
+                oci_attachment: $attachment_ref
+              }]' "$REPORT_PATH" > "$report_tmp"
+            mv "$report_tmp" "$REPORT_PATH"
+          done < <(jq -r '.artifacts[].digest_reference' slsa-publication/publish-results.json)
+
+          expected=$(jq '.artifacts | length' slsa-publication/publish-results.json)
+          recorded=$(jq '.artifacts | length' "$REPORT_PATH")
+          test "$recorded" -eq "$expected"
+
+      - name: Require complete isolated SLSA verification
+        run: |
+          PUBLISH_RESULTS="slsa-publication/publish-results.json"
+          SLSA_REPORT="slsa-publication/slsa-verification-report.json"
+          EXPECTED_SUBJECTS="$RUNNER_TEMP/expected-slsa-subjects.txt"
+          VERIFIED_SUBJECTS="$RUNNER_TEMP/verified-slsa-subjects.txt"
+
+          jq -e '.schema == "biochef.slsa-verification-report.v1"' \
+            "$SLSA_REPORT" > /dev/null
+          jq -er '.artifacts[].digest_reference' "$PUBLISH_RESULTS" \
+            | sort -u > "$EXPECTED_SUBJECTS"
+          jq -er '
+            .artifacts[]
+            | select(.provenance_verification == "passed")
+            | .subject
+          ' "$SLSA_REPORT" | sort -u > "$VERIFIED_SUBJECTS"
+          test -s "$EXPECTED_SUBJECTS"
+          diff -u "$EXPECTED_SUBJECTS" "$VERIFIED_SUBJECTS"
+
+      - name: Preserve SLSA verification evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: biochef-slsa-verification-evidence
+          path: |
+            slsa-publication/publish-results.json
+            slsa-publication/slsa-verification-report.json
+            slsa-publication/verified-slsa-statement.json
+            slsa-publication/oci-manifests/
+            slsa-provenance/${{ needs.slsa_provenance.outputs.provenance-name }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Checkout caller recipes
+        if: inputs.publish_catalog
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout exact hub source used by build
+        if: inputs.publish_catalog
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.hub_repository }}
+          ref: ${{ needs.build.outputs.hub_sha }}
+          path: .hub
+          token: ${{ secrets.HUB_REPOSITORY_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Set up Python
+        if: inputs.publish_catalog
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        if: inputs.publish_catalog
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r ./.hub/hub/requirements.txt
+
+      - name: Install Cosign
+        if: inputs.publish_catalog
+        uses: sigstore/cosign-installer@v4.1.2
+
+      - name: Download verified BioCHEF publication state
+        if: inputs.publish_catalog
+        uses: actions/download-artifact@v8
+        with:
+          name: biochef-verified-publication-state
+          path: ${{ env.REGISTRY_DIR }}
+
+      - name: Authenticate Cosign to registry
+        if: inputs.publish_catalog
+        env:
+          REGISTRY_URL: ${{ inputs.registry_url }}
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+          echo "$REGISTRY_PASSWORD" | docker login "$REGISTRY_URL" \
+            --username "$REGISTRY_USERNAME" \
+            --password-stdin
 
       - name: Generate, sign, and publish verified catalog
         if: inputs.publish_catalog

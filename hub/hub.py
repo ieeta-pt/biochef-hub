@@ -187,7 +187,6 @@ def publish_catalog_cmd(args):
         catalog_version=args.catalog_version,
         channel=args.channel,
         sequence=args.sequence,
-        expires_days=args.expires_days,
         private_jwk_path=args.private_jwk,
     )
     print(f"Verified catalog published: entries={summary.entries}")
@@ -268,7 +267,6 @@ def main():
     catalog_parser.add_argument("--catalog-version", help="Immutable catalog tag. Defaults to catalog-<run id>-<sha> in GitHub Actions")
     catalog_parser.add_argument("--channel", default="latest", help="Mutable catalog channel tag")
     catalog_parser.add_argument("--sequence", type=int, help="Monotonic catalog sequence. Defaults to current Unix time")
-    catalog_parser.add_argument("--expires-days", type=int, default=30, help="Catalog validity period in days")
     catalog_parser.add_argument("--private-jwk", help="Path to EC P-256 private JWK. Defaults to BIOCHEF_CATALOG_SIGNING_PRIVATE_JWK")
     catalog_parser.set_defaults(func=publish_catalog_cmd)
 
