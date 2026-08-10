@@ -583,6 +583,13 @@ jobs:
           path: .hub
           persist-credentials: false
 
+      - name: Restore SLSA verification evidence after checkouts
+        if: inputs.publish_catalog
+        uses: actions/download-artifact@v8
+        with:
+          name: biochef-slsa-verification-evidence
+          path: .
+
       - name: Set up Python
         if: inputs.publish_catalog
         uses: actions/setup-python@v5
