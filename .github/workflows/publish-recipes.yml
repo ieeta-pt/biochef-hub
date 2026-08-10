@@ -28,14 +28,6 @@ on:
         required: false
         type: boolean
         default: false
-      hub_ref:
-        required: false
-        type: string
-        default: master
-      hub_repository:
-        required: false
-        type: string
-        default: ieeta-pt/biochef-hub
       biowasm_builder_image:
         required: false
         type: string
@@ -47,14 +39,10 @@ on:
         required: true
       BIOCHEF_CATALOG_SIGNING_PRIVATE_JWK:
         required: false
-      HUB_REPOSITORY_TOKEN:
-        required: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    outputs:
-      hub_sha: ${{ steps.hub_identity.outputs.sha }}
     permissions:
       contents: read
     env:
@@ -72,15 +60,35 @@ jobs:
       - name: Checkout hub source
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.hub_repository }}
-          ref: ${{ inputs.hub_ref }}
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: .hub
-          token: ${{ secrets.HUB_REPOSITORY_TOKEN || github.token }}
           persist-credentials: false
 
-      - name: Record exact hub revision
-        id: hub_identity
-        run: echo "sha=$(git -C .hub rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Require exact reusable workflow source
+        env:
+          HUB_WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
+          HUB_WORKFLOW_REF: ${{ job.workflow_ref }}
+          HUB_WORKFLOW_SHA: ${{ job.workflow_sha }}
+          PACKAGE_PREFIX: ${{ inputs.package_prefix }}
+          REGISTRY_URL: ${{ inputs.registry_url }}
+        run: |
+          test "$HUB_WORKFLOW_REPOSITORY" = "ieeta-pt/biochef-hub"
+          case "$HUB_WORKFLOW_REF" in
+            ieeta-pt/biochef-hub/.github/workflows/publish-recipes.yml@refs/heads/*)
+              ;;
+            *)
+              echo "Unauthorized BioCHEF Hub workflow identity: $HUB_WORKFLOW_REF" >&2
+              exit 1
+              ;;
+          esac
+          if [ "$REGISTRY_URL" = "registry.biochef.app" ] \
+            && [ "$PACKAGE_PREFIX" = "biochef-plugins-" ] \
+            && [ "$HUB_WORKFLOW_REF" != "ieeta-pt/biochef-hub/.github/workflows/publish-recipes.yml@refs/heads/master" ]; then
+            echo "Production publication requires the BioCHEF Hub workflow from master" >&2
+            exit 1
+          fi
+          test "$(git -C .hub rev-parse HEAD)" = "$HUB_WORKFLOW_SHA"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -159,10 +167,9 @@ jobs:
       - name: Checkout exact hub source used by build
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.hub_repository }}
-          ref: ${{ needs.build.outputs.hub_sha }}
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: .hub
-          token: ${{ secrets.HUB_REPOSITORY_TOKEN || github.token }}
           persist-credentials: false
 
       - name: Set up Python
@@ -197,18 +204,6 @@ jobs:
             --registry "$REGISTRY_URL" \
             --package-prefix "$PACKAGE_PREFIX"
 
-      - name: Generate SLSA provenance predicates
-        env:
-          HUB_REPOSITORY: ${{ inputs.hub_repository }}
-          HUB_REF: ${{ inputs.hub_ref }}
-        run: |
-          python ./.hub/hub/hub.py provenance \
-            --registry-dir "$REGISTRY_DIR" \
-            --publish-results "$REGISTRY_DIR/publish-results.json" \
-            --hub-repository "$HUB_REPOSITORY" \
-            --hub-ref "$HUB_REF" \
-            --workflow-path ".github/workflows/publish-recipes.yml"
-
       - name: Install Cosign
         uses: sigstore/cosign-installer@v4.1.2
 
@@ -225,20 +220,24 @@ jobs:
       - name: Sign and attest published bundles
         env:
           COSIGN_YES: "true"
+          HUB_WORKFLOW_SHA: ${{ job.workflow_sha }}
           SIGNING_POLICY: ${{ inputs.signing_policy }}
         run: |
           python ./.hub/hub/hub.py sign-attest \
             --registry-dir "$REGISTRY_DIR" \
             --publish-results "$REGISTRY_DIR/publish-results.json" \
+            --expected-hub-commit "$HUB_WORKFLOW_SHA" \
             --policy "$SIGNING_POLICY"
 
       - name: Verify published signatures and attestations
         env:
+          HUB_WORKFLOW_SHA: ${{ job.workflow_sha }}
           SIGNING_POLICY: ${{ inputs.signing_policy }}
         run: |
           python ./.hub/hub/hub.py verify-attestations \
             --registry-dir "$REGISTRY_DIR" \
             --publish-results "$REGISTRY_DIR/publish-results.json" \
+            --expected-hub-commit "$HUB_WORKFLOW_SHA" \
             --policy "$SIGNING_POLICY" \
             --report "$REGISTRY_DIR/signing-verification-report.json"
 
@@ -281,7 +280,6 @@ jobs:
             ${{ env.REGISTRY_DIR }}/*/*/bundle.json
             ${{ env.REGISTRY_DIR }}/*/*/sbom.cdx.json
             ${{ env.REGISTRY_DIR }}/*/*/build-evidence.json
-            ${{ env.REGISTRY_DIR }}/*/*/provenance.slsa.json
           if-no-files-found: error
           retention-days: 7
 
@@ -442,9 +440,16 @@ jobs:
           REPORT_PATH="slsa-publication/slsa-verification-report.json"
           VERIFIED_STATEMENT_PATH="slsa-publication/verified-slsa-statement.json"
           PROVENANCE_SHA256=$(sha256sum "$PROVENANCE_PATH" | cut -d ' ' -f 1)
+          PROVENANCE_SIZE=$(stat -c '%s' "$PROVENANCE_PATH")
+          PUBLISH_RESULTS_SHA256=$(sha256sum slsa-publication/publish-results.json | cut -d ' ' -f 1)
           VERIFIED_STATEMENT_SHA256=$(sha256sum "$VERIFIED_STATEMENT_PATH" | cut -d ' ' -f 1)
           jq -n \
+            --arg artifact_type "$PROVENANCE_ARTIFACT_TYPE" \
+            --arg build_type "https://github.com/slsa-framework/slsa-github-generator/generic@v1" \
+            --arg builder_id "https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@refs/tags/v2.1.0" \
+            --arg predicate_type "https://slsa.dev/provenance/v0.2" \
             --arg provenance_digest "sha256:$PROVENANCE_SHA256" \
+            --arg publish_results_digest "sha256:$PUBLISH_RESULTS_SHA256" \
             --arg source_commit "$GITHUB_SHA" \
             --arg source_ref "$GITHUB_REF" \
             --arg source_repository "github.com/$GITHUB_REPOSITORY" \
@@ -453,18 +458,27 @@ jobs:
             '{
               schema: "biochef.slsa-verification-report.v1",
               provenance_digest: $provenance_digest,
+              provenance_artifact_type: $artifact_type,
               verified_statement_digest: $verified_statement_digest,
+              publish_results_digest: $publish_results_digest,
               verification_mode: "slsa-verifier verify-artifact",
               source_repository: $source_repository,
               source_ref: $source_ref,
               source_commit: $source_commit,
               source_workflow: $source_workflow,
-              builder_id: "https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@refs/tags/v2.1.0",
+              builder_id: $builder_id,
+              predicate_type: $predicate_type,
+              build_type: $build_type,
               artifacts: []
             }' > "$REPORT_PATH"
 
           while IFS= read -r reference; do
+            subject_repository="${reference%@*}"
             subject_digest="${reference##*@}"
+            if [[ ! "$subject_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "Invalid provenance subject reference: $reference" >&2
+              exit 1
+            fi
             attachment=$(oras attach \
               --artifact-type "$PROVENANCE_ARTIFACT_TYPE" \
               --annotation "dev.biochef.provenance.generator=slsa-github-generator-v2.1.0" \
@@ -472,11 +486,39 @@ jobs:
               "$reference" \
               "$PROVENANCE_PATH:$PROVENANCE_ARTIFACT_TYPE")
             attachment_ref=$(jq -er '.reference' <<< "$attachment")
-            oras manifest fetch "$attachment_ref" | jq -e \
-              --arg digest "$subject_digest" \
+            attachment_repository="${attachment_ref%@*}"
+            attachment_digest="${attachment_ref##*@}"
+            if [ "$attachment_repository" != "$subject_repository" ] \
+              || [[ ! "$attachment_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "Invalid provenance attachment reference: $attachment_ref" >&2
+              exit 1
+            fi
+
+            digest_hex="${subject_digest#sha256:}"
+            attachment_manifest="$RUNNER_TEMP/$digest_hex.slsa-attachment.manifest.json"
+            attachment_blob="$RUNNER_TEMP/$digest_hex.slsa-provenance.bundle"
+            oras manifest fetch --output "$attachment_manifest" "$attachment_ref"
+            printf '%s  %s\n' "${attachment_digest#sha256:}" "$attachment_manifest" \
+              | sha256sum --check --strict -
+
+            jq -e \
               --arg artifact_type "$PROVENANCE_ARTIFACT_TYPE" \
-              '.subject.digest == $digest and .artifactType == $artifact_type' \
-              > /dev/null
+              --arg provenance_digest "sha256:$PROVENANCE_SHA256" \
+              --arg subject_digest "$subject_digest" \
+              --argjson provenance_size "$PROVENANCE_SIZE" \
+              '.subject.digest == $subject_digest
+                and .artifactType == $artifact_type
+                and (.layers | type == "array" and length == 1)
+                and .layers[0].mediaType == $artifact_type
+                and .layers[0].digest == $provenance_digest
+                and .layers[0].size == $provenance_size' \
+              "$attachment_manifest" > /dev/null
+
+            oras blob fetch --output "$attachment_blob" \
+              "$attachment_repository@sha256:$PROVENANCE_SHA256"
+            printf '%s  %s\n' "$PROVENANCE_SHA256" "$attachment_blob" \
+              | sha256sum --check --strict -
+            cmp "$PROVENANCE_PATH" "$attachment_blob"
 
             report_tmp="${REPORT_PATH}.tmp"
             jq \
@@ -536,10 +578,9 @@ jobs:
         if: inputs.publish_catalog
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.hub_repository }}
-          ref: ${{ needs.build.outputs.hub_sha }}
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: .hub
-          token: ${{ secrets.HUB_REPOSITORY_TOKEN || github.token }}
           persist-credentials: false
 
       - name: Set up Python
@@ -592,6 +633,7 @@ jobs:
             --registry-dir "$REGISTRY_DIR" \
             --publish-results "$REGISTRY_DIR/publish-results.json" \
             --verification-report "$REGISTRY_DIR/signing-verification-report.json" \
+            --slsa-verification-report "slsa-publication/slsa-verification-report.json" \
             --policy "$SIGNING_POLICY" \
             --package-prefix "$PACKAGE_PREFIX"
 

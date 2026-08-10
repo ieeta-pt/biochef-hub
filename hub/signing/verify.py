@@ -1,7 +1,6 @@
 import base64
 import binascii
 import json
-import os
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -9,13 +8,6 @@ from pathlib import Path
 
 from builders.container import is_sha256_hex, sha256_hex
 from publish.publish import read_publish_results
-from signing.provenance import (
-    BIOCHEF_BUILD_TYPE,
-    SLSA_PREDICATE_TYPE,
-    ProvenanceError,
-    normalise_slsa_timestamp,
-    resolved_dependencies_from_evidence,
-)
 
 
 CYCLONEDX_PREDICATE_TYPE = "https://cyclonedx.org/bom"
@@ -55,6 +47,7 @@ def verify_published_artifacts(
     cosign_bin="cosign",
     operation_id=None,
     version=None,
+    expected_hub_commit=None,
 ):
     return check_or_verify(
         registry_dir,
@@ -64,6 +57,7 @@ def verify_published_artifacts(
         verify_cosign=True,
         operation_id=operation_id,
         version=version,
+        expected_hub_commit=expected_hub_commit,
     )
 
 
@@ -73,6 +67,7 @@ def check_published_evidence(
     policy_path=None,
     operation_id=None,
     version=None,
+    expected_hub_commit=None,
 ):
     return check_or_verify(
         registry_dir,
@@ -82,6 +77,7 @@ def check_published_evidence(
         verify_cosign=False,
         operation_id=operation_id,
         version=version,
+        expected_hub_commit=expected_hub_commit,
     )
 
 
@@ -145,6 +141,7 @@ def check_or_verify(
     verify_cosign,
     operation_id,
     version,
+    expected_hub_commit,
 ):
     registry_path = Path(registry_dir).resolve()
     if not registry_path.is_dir():
@@ -153,6 +150,8 @@ def check_or_verify(
         )
     if not policy_path:
         raise VerificationError("A signing verification policy is required")
+    if not _git_commit(expected_hub_commit):
+        raise VerificationError("An exact Hub workflow commit is required")
     policy = load_policy(policy_path)
     results_path = Path(
         publish_results_path or registry_path / "publish-results.json"
@@ -175,11 +174,11 @@ def check_or_verify(
         summary.scanned += 1
         verify_artifact(
             registry_path,
-            publish_results["registry"],
             artifact,
             policy,
             cosign_bin,
             verify_cosign,
+            expected_hub_commit,
             summary,
         )
     return summary
@@ -187,11 +186,11 @@ def check_or_verify(
 
 def verify_artifact(
     registry_path,
-    registry,
     artifact,
     policy,
     cosign_bin,
     verify_cosign,
+    expected_hub_commit,
     summary,
 ):
     operation_id = artifact["operation_id"]
@@ -226,11 +225,10 @@ def verify_artifact(
         operation_id,
         version,
     )
-    verify_local_provenance(
+    verify_local_evidence(
         bundle_dir,
         artifact,
-        registry,
-        policy,
+        expected_hub_commit,
         summary,
         name,
     )
@@ -247,50 +245,35 @@ def verify_artifact(
         name,
         "SIGNATURE_VERIFY_FAILED",
     )
-    for cosign_type, predicate_type, filename, code in (
-        (
+    output = run_cosign(
+        [
+            cosign_bin,
+            "verify-attestation",
+            "--type",
             "cyclonedx",
+            *args,
+            reference,
+        ],
+        summary,
+        name,
+        "CYCLONEDX_ATTESTATION_VERIFY_FAILED",
+    )
+    if output is not None:
+        verify_attestation_payload(
+            output,
+            bundle_dir / "sbom.cdx.json",
             CYCLONEDX_PREDICATE_TYPE,
-            "sbom.cdx.json",
-            "CYCLONEDX_ATTESTATION",
-        ),
-        (
-            SLSA_PREDICATE_TYPE,
-            SLSA_PREDICATE_TYPE,
-            "provenance.slsa.json",
-            "SLSA_ATTESTATION",
-        ),
-    ):
-        output = run_cosign(
-            [
-                cosign_bin,
-                "verify-attestation",
-                "--type",
-                cosign_type,
-                *args,
-                reference,
-            ],
+            reference,
             summary,
             name,
-            f"{code}_VERIFY_FAILED",
+            "CYCLONEDX_ATTESTATION_PAYLOAD_MISMATCH",
         )
-        if output is not None:
-            verify_attestation_payload(
-                output,
-                bundle_dir / filename,
-                predicate_type,
-                reference,
-                summary,
-                name,
-                f"{code}_PAYLOAD_MISMATCH",
-            )
 
 
-def verify_local_provenance(
+def verify_local_evidence(
     bundle_dir,
     artifact,
-    registry,
-    policy,
+    expected_hub_commit,
     summary,
     name,
 ):
@@ -298,7 +281,6 @@ def verify_local_provenance(
         "bundle.json",
         "build-evidence.json",
         "sbom.cdx.json",
-        "provenance.slsa.json",
     )
     for filename in required:
         path = bundle_dir / filename
@@ -312,156 +294,47 @@ def verify_local_provenance(
     if any(issue.artifact == name for issue in summary.failures):
         return
 
+    bundle = read_json(bundle_dir / "bundle.json")
     evidence = read_json(bundle_dir / "build-evidence.json")
-    provenance = read_json(bundle_dir / "provenance.slsa.json")
-    definition = provenance.get("buildDefinition") or {}
-    details = provenance.get("runDetails") or {}
-    require(
-        summary,
-        name,
-        definition.get("buildType") == policy["slsa_build_type"],
-        "SLSA_BUILD_TYPE",
-        "SLSA build type does not match policy",
-    )
-    require(
-        summary,
-        name,
-        (details.get("builder") or {}).get("id")
-        == policy["certificate_identity"],
-        "SLSA_BUILDER",
-        "SLSA builder does not match signer identity",
-    )
-
-    external = definition.get("externalParameters")
-    if not isinstance(external, dict):
-        fail(summary, name, "SLSA_PARAMETERS", "External parameters are not an object")
-        external = {}
-    allowed = set(policy["allowed_external_parameters"])
-    require(
-        summary,
-        name,
-        set(external) == allowed,
-        "SLSA_PARAMETERS",
-        "SLSA external parameters do not exactly match policy",
-    )
     recipe = evidence.get("recipe") or {}
-    expected = {
-        **policy["expected_external_parameters"],
-        "operationId": artifact["operation_id"],
-        "version": artifact["version"],
-        "package": artifact["package"],
-        "recipePath": recipe.get("path"),
-    }
+    operation = evidence.get("operation") or {}
     require(
         summary,
         name,
-        registry == policy["expected_external_parameters"]["registry"],
-        "SLSA_REGISTRY",
-        "Publish registry does not match policy",
+        bundle.get("id") == artifact["operation_id"]
+        and bundle.get("version") == artifact["version"],
+        "BUNDLE_IDENTITY",
+        "Bundle identity does not match the published artifact",
     )
-    for key in allowed:
-        require(
-            summary,
-            name,
-            key in expected and external.get(key) == expected.get(key),
-            "SLSA_PARAMETERS",
-            f"SLSA external parameter does not match policy: {key}",
-        )
-
-    metadata = details.get("metadata") or {}
-    try:
-        expected_time = normalise_slsa_timestamp(evidence.get("generated_at"))
-        actual_time = normalise_slsa_timestamp(metadata.get("finishedOn"))
-        require(
-            summary,
-            name,
-            actual_time == expected_time,
-            "SLSA_FINISHED_TIME",
-            "SLSA finishedOn does not match build evidence",
-        )
-    except ProvenanceError as exc:
-        fail(summary, name, "SLSA_FINISHED_TIME", str(exc))
-
-    recipes_repository, recipes_commit = recipes_identity(
-        definition.get("resolvedDependencies") or []
-    )
-    if os.getenv("GITHUB_ACTIONS") == "true":
-        require(
-            summary,
-            name,
-            recipes_repository == os.getenv("GITHUB_REPOSITORY")
-            and recipes_commit == os.getenv("GITHUB_SHA"),
-            "SLSA_RECIPES_IDENTITY",
-            "Recipe repository identity does not match the workflow context",
-        )
-    try:
-        expected_dependencies = resolved_dependencies_from_evidence(
-            evidence,
-            recipes_repository=recipes_repository,
-            recipes_commit=recipes_commit,
-            hub_repository=policy["expected_external_parameters"]["hubRepository"],
-        )
-    except ProvenanceError as exc:
-        fail(summary, name, "SLSA_DEPENDENCIES", str(exc))
-        expected_dependencies = []
-    actual_dependencies = definition.get("resolvedDependencies")
-    if not isinstance(actual_dependencies, list):
-        fail(summary, name, "SLSA_DEPENDENCIES", "resolvedDependencies is not a list")
-        actual_dependencies = []
     require(
         summary,
         name,
-        actual_dependencies == expected_dependencies,
-        "SLSA_DEPENDENCIES",
-        "SLSA resolved dependencies do not exactly match build evidence",
+        evidence.get("schema") == "biochef.build-evidence.v1"
+        and recipe.get("version") == artifact["version"]
+        and operation.get("id") == artifact["operation_id"],
+        "BUILD_EVIDENCE_IDENTITY",
+        "Build evidence does not match the published artifact",
     )
-
-    expected_byproducts = expected_byproduct_digests(bundle_dir, evidence)
-    actual_byproducts = {}
-    for item in details.get("byproducts") or []:
-        if isinstance(item, dict) and isinstance(item.get("uri"), str):
-            actual_byproducts[item["uri"]] = (item.get("digest") or {}).get("sha256")
     require(
         summary,
         name,
-        actual_byproducts == expected_byproducts,
-        "SLSA_BYPRODUCTS",
-        "SLSA byproducts do not exactly match local bundle files",
-    )
-
-
-def expected_byproduct_digests(bundle_dir, evidence):
-    paths = {"bundle.json", "build-evidence.json", "sbom.cdx.json"}
-    for item in (evidence.get("license") or {}).get("files") or []:
-        paths.add(item["path"])
-    for runtime_data in (evidence.get("runtimes") or {}).values():
-        for item in (runtime_data.get("artifacts") or {}).get("files") or []:
-            paths.add(item["path"])
-    return {
-        f"file:{relative}": sha256_hex(require_file(bundle_dir, relative))
-        for relative in sorted(paths)
-    }
-
-
-def recipes_identity(dependencies):
-    matches = [
-        item
-        for item in dependencies
-        if isinstance(item, dict) and item.get("name") == "biochef-recipes"
-    ]
-    if len(matches) != 1:
-        raise VerificationError(
-            "SLSA provenance must contain one recipe repository dependency"
+        isinstance((evidence.get("hub") or {}).get("commit"), str)
+        and len((evidence.get("hub") or {})["commit"]) == 40
+        and all(
+            character in "0123456789abcdef"
+            for character in (evidence.get("hub") or {})["commit"].lower()
         )
-    descriptor = matches[0]
-    commit = (descriptor.get("digest") or {}).get("gitCommit")
-    uri = descriptor.get("uri")
-    if not isinstance(uri, str) or not uri.startswith("git+") or not commit:
-        raise VerificationError("Recipe repository dependency is malformed")
-    suffix = f"@{commit}"
-    if not uri.endswith(suffix):
-        raise VerificationError("Recipe repository URI and commit differ")
-    return uri[4:-len(suffix)], commit
+        and (evidence.get("hub") or {}).get("dirty") is False,
+        "BUILD_EVIDENCE_HUB",
+        "Build evidence does not identify a clean Hub commit",
+    )
+    require(
+        summary,
+        name,
+        (evidence.get("hub") or {}).get("commit") == expected_hub_commit,
+        "BUILD_EVIDENCE_HUB_IDENTITY",
+        "Build evidence does not match the runner-resolved Hub workflow commit",
+    )
 
 
 def verify_attestation_payload(
@@ -537,6 +410,7 @@ def write_verification_report(
     publish_results_path,
     policy_path,
     summary,
+    expected_hub_commit,
 ):
     registry_path = Path(registry_dir).resolve()
     results_path = Path(
@@ -580,6 +454,7 @@ def write_verification_report(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "status": "failed" if summary.failed else "passed",
         "scanned": summary.scanned,
+        "hub_commit": expected_hub_commit,
         "policy": {
             "digest": f"sha256:{sha256_hex(Path(policy_path).resolve())}"
         },
@@ -602,7 +477,6 @@ def verification_evidence_digests(bundle_dir):
         "bundle_json": "bundle.json",
         "sbom_cdx_json": "sbom.cdx.json",
         "build_evidence_json": "build-evidence.json",
-        "provenance_slsa_json": "provenance.slsa.json",
     }
     return {
         key: f"sha256:{sha256_hex(require_file(bundle_dir, value))}"
@@ -616,44 +490,22 @@ def load_policy(path):
         "registry_prefix",
         "certificate_identity",
         "certificate_oidc_issuer",
+        "slsa_builder_id",
         "slsa_predicate_type",
         "slsa_build_type",
+        "slsa_source_repository",
+        "slsa_source_ref",
+        "slsa_source_workflow",
     )
     if policy.get("schema") != "biochef.signing-policy.v1":
         raise VerificationError("Unsupported signing policy")
+    if set(policy) != {"schema", *required}:
+        raise VerificationError("Signing policy contains missing or unsupported fields")
     if any(not isinstance(policy.get(key), str) or not policy[key] for key in required):
         raise VerificationError("Signing policy is missing required identities")
-    if (
-        policy["slsa_predicate_type"] != SLSA_PREDICATE_TYPE
-        or policy["slsa_build_type"] != BIOCHEF_BUILD_TYPE
-    ):
-        raise VerificationError("Signing policy requires unsupported SLSA semantics")
-    allowed = policy.get("allowed_external_parameters")
-    expected = policy.get("expected_external_parameters")
-    required_allowed = {
-        "registry",
-        "package",
-        "operationId",
-        "version",
-        "recipePath",
-        "hubRepository",
-        "hubRef",
-    }
-    if not isinstance(allowed, list) or set(allowed) != required_allowed:
-        raise VerificationError(
-            "Signing policy external parameters do not match the BioCHEF build type"
-        )
-    if not isinstance(expected, dict) or set(expected) != {
-        "registry",
-        "hubRepository",
-        "hubRef",
-    }:
-        raise VerificationError(
-            "Signing policy fixed external expectations are incomplete"
-        )
     registry_prefix = policy["registry_prefix"]
-    if not registry_prefix.startswith(f"{expected['registry'].rstrip('/')}/"):
-        raise VerificationError("Signing policy registry prefix is inconsistent")
+    if "/" not in registry_prefix or registry_prefix.endswith("/"):
+        raise VerificationError("Signing policy registry prefix is invalid")
     return policy
 
 
@@ -702,6 +554,14 @@ def digest_reference(value):
     if not isinstance(value, str) or "@sha256:" not in value:
         return False
     return is_sha256_hex(value.rsplit("@sha256:", 1)[1])
+
+
+def _git_commit(value):
+    return (
+        isinstance(value, str)
+        and len(value) == 40
+        and all(character in "0123456789abcdef" for character in value.lower())
+    )
 
 
 def identity_args(policy):

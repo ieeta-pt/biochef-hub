@@ -52,6 +52,7 @@ def generate_sign_and_publish_catalog(
     registry_dir: str | Path = "registry",
     publish_results_path: str | Path | None = None,
     verification_report_path: str | Path | None = None,
+    slsa_verification_report_path: str | Path | None = None,
     signing_policy_path: str | Path | None = None,
     registry_url: str | None = None,
     package_prefix: str = "biochef-plugins-",
@@ -66,9 +67,12 @@ def generate_sign_and_publish_catalog(
         raise CatalogError(f"Registry directory does not exist: {registry_path}")
     if not signing_policy_path:
         raise CatalogError("A signing policy is required")
+    if not slsa_verification_report_path:
+        raise CatalogError("An official SLSA verification report is required")
 
     results_path = Path(publish_results_path or registry_path / "publish-results.json").resolve()
     report_path = Path(verification_report_path or registry_path / "signing-verification-report.json").resolve()
+    slsa_report_path = Path(slsa_verification_report_path).resolve()
     policy_path = Path(signing_policy_path).resolve()
 
     try:
@@ -81,18 +85,28 @@ def generate_sign_and_publish_catalog(
             "A catalog publication may contain only one version of each package"
         )
     verification_report = _read_json(report_path)
+    slsa_verification_report = _read_json(slsa_report_path)
     try:
         signing_policy = load_policy(policy_path)
     except VerificationError as exc:
         raise CatalogError(str(exc)) from exc
     _validate_verification_report(verification_report, report_path)
     _validate_verification_report_binding(verification_report, policy_path, results_path)
+    _validate_slsa_verification_report(
+        slsa_verification_report,
+        slsa_report_path,
+        signing_policy,
+        publish_results,
+        results_path,
+    )
 
     private_key, public_jwk = _load_private_key(private_jwk_path, private_jwk_json)
 
     registry = registry_url or publish_results["registry"]
     if registry != publish_results["registry"]:
         raise CatalogError("Catalog registry does not match publish-results registry")
+    if signing_policy["registry_prefix"] != f"{registry.rstrip('/')}/{package_prefix}":
+        raise CatalogError("Catalog target does not match the verification policy namespace")
 
     existing_catalog = _pull_verified_catalog(
         registry_url=registry,
@@ -120,10 +134,11 @@ def generate_sign_and_publish_catalog(
         "sequence": next_sequence,
         "registry": registry,
         "package_prefix": package_prefix,
-        "signing_policy": {
+        "verification_policy": {
             "digest": f"sha256:{sha256_hex(policy_path)}",
             "certificate_identity": signing_policy.get("certificate_identity"),
             "certificate_oidc_issuer": signing_policy.get("certificate_oidc_issuer"),
+            "slsa_builder_id": signing_policy.get("slsa_builder_id"),
             "slsa_predicate_type": signing_policy.get("slsa_predicate_type"),
             "slsa_build_type": signing_policy.get("slsa_build_type"),
         },
@@ -138,13 +153,27 @@ def generate_sign_and_publish_catalog(
     }
 
     report_by_artifact = _verification_report_by_artifact(verification_report)
+    slsa_by_subject = _slsa_report_by_subject(slsa_verification_report)
     for artifact in publish_results["artifacts"]:
         artifact_name = f"{artifact.get('operation_id')}@{artifact.get('version')}"
         report_entry = report_by_artifact.get(artifact_name)
         if not report_entry:
             raise CatalogError(f"Refusing to catalog unverified artifact: {artifact_name}")
+        slsa_entry = slsa_by_subject.get(artifact["digest_reference"])
+        if not slsa_entry:
+            raise CatalogError(
+                f"Refusing to catalog artifact without verified official SLSA provenance: {artifact_name}"
+            )
         _validate_verified_artifact(artifact, report_entry)
-        entry = _catalog_entry(registry_path, artifact, report_entry, signing_policy)
+        entry = _catalog_entry(
+            registry_path,
+            artifact,
+            report_entry,
+            slsa_entry,
+            slsa_verification_report,
+            verification_report["hub_commit"],
+            signing_policy,
+        )
         catalog["packages"][entry["package"]] = entry
 
     catalog_path = registry_path / "index.json"
@@ -182,7 +211,15 @@ def generate_sign_and_publish_catalog(
     )
 
 
-def _catalog_entry(registry_path: Path, artifact: dict[str, Any], report_entry: dict[str, Any], signing_policy: dict[str, Any]) -> dict[str, Any]:
+def _catalog_entry(
+    registry_path: Path,
+    artifact: dict[str, Any],
+    report_entry: dict[str, Any],
+    slsa_entry: dict[str, Any],
+    slsa_report: dict[str, Any],
+    expected_hub_commit: str,
+    signing_policy: dict[str, Any],
+) -> dict[str, Any]:
     operation_id = artifact["operation_id"]
     version = artifact["version"]
     package = artifact["package"]
@@ -203,9 +240,14 @@ def _catalog_entry(registry_path: Path, artifact: dict[str, Any], report_entry: 
 
     bundle_path = bundle_dir / "bundle.json"
     bundle = _read_json(bundle_path)
+    build_evidence = _read_json(bundle_dir / "build-evidence.json")
     if bundle.get("id") != operation_id or bundle.get("version") != version:
         raise CatalogError(
             f"Bundle identity does not match published artifact {operation_id}@{version}"
+        )
+    if (build_evidence.get("hub") or {}).get("commit") != expected_hub_commit:
+        raise CatalogError(
+            f"Build evidence Hub commit changed after verification for {operation_id}@{version}"
         )
     runtime = bundle.get("runtime") or {}
     wasm = runtime.get("wasm") or {}
@@ -252,15 +294,21 @@ def _catalog_entry(registry_path: Path, artifact: dict[str, Any], report_entry: 
             "bundle_json": local_evidence["bundle_json"],
             "sbom_cdx_json": local_evidence["sbom_cdx_json"],
             "build_evidence_json": local_evidence["build_evidence_json"],
+            "hub_commit": expected_hub_commit,
             "attestations": {
-                "discovery": "oci-referrers",
                 "subject": digest_reference,
                 "cyclonedx": {
+                    "discovery": "oci-referrers",
                     "predicate_type": "https://cyclonedx.org/bom",
                 },
                 "slsa_provenance": {
-                    "predicate_type": signing_policy["slsa_predicate_type"],
-                    "build_type": signing_policy["slsa_build_type"],
+                    "discovery": "oci-referrers",
+                    "artifact_type": slsa_report["provenance_artifact_type"],
+                    "builder_id": slsa_report["builder_id"],
+                    "predicate_type": slsa_report["predicate_type"],
+                    "build_type": slsa_report["build_type"],
+                    "provenance_digest": slsa_report["provenance_digest"],
+                    "oci_attachment": slsa_entry["oci_attachment"],
                 },
             },
         },
@@ -268,11 +316,10 @@ def _catalog_entry(registry_path: Path, artifact: dict[str, Any], report_entry: 
             "status": report_entry["status"],
             "cosign_signature": "passed",
             "cyclonedx_attestation": "passed",
-            "slsa_attestation": "passed",
+            "slsa_provenance": "passed",
             "certificate_identity": signing_policy["certificate_identity"],
             "certificate_oidc_issuer": signing_policy["certificate_oidc_issuer"],
-            "slsa_predicate_type": signing_policy["slsa_predicate_type"],
-            "slsa_build_type": signing_policy["slsa_build_type"],
+            "slsa_builder_id": slsa_report["builder_id"],
         },
     }
 
@@ -460,11 +507,12 @@ def _validate_existing_catalog(
         "digest": f"sha256:{sha256_hex(policy_path)}",
         "certificate_identity": signing_policy.get("certificate_identity"),
         "certificate_oidc_issuer": signing_policy.get("certificate_oidc_issuer"),
+        "slsa_builder_id": signing_policy.get("slsa_builder_id"),
         "slsa_predicate_type": signing_policy.get("slsa_predicate_type"),
         "slsa_build_type": signing_policy.get("slsa_build_type"),
     }
-    if catalog.get("signing_policy") != expected_policy:
-        raise CatalogError("Existing catalog was generated under a different signing policy")
+    if catalog.get("verification_policy") != expected_policy:
+        raise CatalogError("Existing catalog was generated under a different verification policy")
     packages = catalog.get("packages")
     if not isinstance(packages, dict) or not packages:
         raise CatalogError("Existing catalog contains no packages")
@@ -502,11 +550,10 @@ def _validate_preserved_catalog_entry(
         "status": "passed",
         "cosign_signature": "passed",
         "cyclonedx_attestation": "passed",
-        "slsa_attestation": "passed",
+        "slsa_provenance": "passed",
         "certificate_identity": signing_policy.get("certificate_identity"),
         "certificate_oidc_issuer": signing_policy.get("certificate_oidc_issuer"),
-        "slsa_predicate_type": signing_policy.get("slsa_predicate_type"),
-        "slsa_build_type": signing_policy.get("slsa_build_type"),
+        "slsa_builder_id": signing_policy.get("slsa_builder_id"),
     }
     if verification != expected_verification:
         raise CatalogError(f"Existing catalog package has invalid verification evidence: {package}")
@@ -514,6 +561,32 @@ def _validate_preserved_catalog_entry(
     required_evidence = ("bundle_json", "sbom_cdx_json", "build_evidence_json")
     if any(not is_sha256_digest(evidence.get(name)) for name in required_evidence):
         raise CatalogError(f"Existing catalog package has invalid evidence digests: {package}")
+    if not _git_commit(evidence.get("hub_commit")):
+        raise CatalogError(f"Existing catalog package has invalid Hub identity: {package}")
+    attestations = evidence.get("attestations") or {}
+    if attestations.get("subject") != digest_reference:
+        raise CatalogError(f"Existing catalog attestation subject is invalid: {package}")
+    if attestations.get("cyclonedx") != {
+        "discovery": "oci-referrers",
+        "predicate_type": "https://cyclonedx.org/bom",
+    }:
+        raise CatalogError(f"Existing catalog CycloneDX evidence is invalid: {package}")
+    slsa = attestations.get("slsa_provenance") or {}
+    attachment = slsa.get("oci_attachment")
+    expected_repository = digest_reference.rsplit("@", 1)[0]
+    if (
+        slsa.get("discovery") != "oci-referrers"
+        or slsa.get("artifact_type")
+        != "application/vnd.dev.sigstore.bundle.v0.3+json"
+        or slsa.get("builder_id") != signing_policy.get("slsa_builder_id")
+        or slsa.get("predicate_type") != signing_policy.get("slsa_predicate_type")
+        or slsa.get("build_type") != signing_policy.get("slsa_build_type")
+        or not is_sha256_digest(slsa.get("provenance_digest"))
+        or not isinstance(attachment, str)
+        or not attachment.startswith(f"{expected_repository}@")
+        or not is_sha256_digest(attachment.rsplit("@", 1)[-1])
+    ):
+        raise CatalogError(f"Existing catalog SLSA evidence is invalid: {package}")
     wasm = ((entry.get("runtime") or {}).get("wasm") or {})
     if not is_sha256_digest(wasm.get("wasm_digest")) or not is_sha256_digest(wasm.get("js_digest")):
         raise CatalogError(f"Existing catalog package has invalid runtime digests: {package}")
@@ -645,6 +718,92 @@ def _verification_report_by_artifact(report: dict[str, Any]) -> dict[str, dict[s
     return entries
 
 
+def _slsa_report_by_subject(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    entries = {}
+    for artifact in report.get("artifacts") or []:
+        if not isinstance(artifact, dict) or not isinstance(artifact.get("subject"), str):
+            raise CatalogError("SLSA verification report contains a malformed artifact entry")
+        subject = artifact["subject"]
+        if subject in entries:
+            raise CatalogError(
+                f"SLSA verification report contains duplicate subject {subject}"
+            )
+        entries[subject] = artifact
+    return entries
+
+
+def _validate_slsa_verification_report(
+    report: dict[str, Any],
+    path: Path,
+    policy: dict[str, Any],
+    publish_results: dict[str, Any],
+    publish_results_path: Path,
+) -> None:
+    if report.get("schema") != "biochef.slsa-verification-report.v1":
+        raise CatalogError(f"Invalid official SLSA verification report schema: {path}")
+    expected_fields = {
+        "builder_id": policy["slsa_builder_id"],
+        "predicate_type": policy["slsa_predicate_type"],
+        "build_type": policy["slsa_build_type"],
+        "source_repository": policy["slsa_source_repository"],
+        "source_ref": policy["slsa_source_ref"],
+        "source_workflow": policy["slsa_source_workflow"],
+    }
+    for field, expected in expected_fields.items():
+        if report.get(field) != expected:
+            raise CatalogError(
+                f"Official SLSA verification report {field} does not match policy"
+            )
+    if report.get("verification_mode") != "slsa-verifier verify-artifact":
+        raise CatalogError("Official SLSA verification mode is unsupported")
+    if report.get("provenance_artifact_type") != "application/vnd.dev.sigstore.bundle.v0.3+json":
+        raise CatalogError("Official SLSA provenance attachment type is unsupported")
+    for field in (
+        "provenance_digest",
+        "verified_statement_digest",
+        "publish_results_digest",
+    ):
+        if not is_sha256_digest(report.get(field)):
+            raise CatalogError(f"Official SLSA verification report has invalid {field}")
+    expected_results_digest = f"sha256:{sha256_hex(publish_results_path)}"
+    if report["publish_results_digest"] != expected_results_digest:
+        raise CatalogError("Official SLSA report covers different publish results")
+    source_commit = report.get("source_commit")
+    if not _git_commit(source_commit):
+        raise CatalogError("Official SLSA report has an invalid source commit")
+    github_sha = os.getenv("GITHUB_SHA")
+    if github_sha and source_commit != github_sha:
+        raise CatalogError("Official SLSA report source commit differs from this run")
+
+    by_subject = _slsa_report_by_subject(report)
+    expected_subjects = {
+        artifact["digest_reference"] for artifact in publish_results["artifacts"]
+    }
+    if set(by_subject) != expected_subjects:
+        raise CatalogError("Official SLSA report does not exactly cover published subjects")
+    for subject, entry in by_subject.items():
+        if entry.get("provenance_verification") != "passed":
+            raise CatalogError(f"Official SLSA verification did not pass for {subject}")
+        attachment = entry.get("oci_attachment")
+        subject_repository = subject.rsplit("@", 1)[0]
+        if (
+            not isinstance(attachment, str)
+            or not attachment.startswith(f"{subject_repository}@")
+            or not is_sha256_digest(attachment.rsplit("@", 1)[-1])
+        ):
+            raise CatalogError(
+                f"Official SLSA attachment reference is invalid for {subject}"
+            )
+
+
+def _git_commit(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 40
+        and all(character in "0123456789abcdef" for character in value.lower())
+    )
+
+
 def _validate_verification_report_binding(
     report: dict[str, Any], policy_path: Path, publish_results_path: Path
 ) -> None:
@@ -687,6 +846,8 @@ def _validate_verification_report(report: dict[str, Any], path: Path) -> None:
         raise CatalogError(f"Verification report contains no artifacts: {path}")
     if report.get("scanned") != len(report["artifacts"]):
         raise CatalogError(f"Verification report does not cover every artifact: {path}")
+    if not _git_commit(report.get("hub_commit")):
+        raise CatalogError(f"Verification report has an invalid Hub commit: {path}")
 
 
 def _catalog_version_from_environment() -> str:

@@ -117,20 +117,6 @@ def publish_cmd(args):
     for artifact in results["artifacts"]:
         print(f"  - {artifact['digest_reference']}")
 
-def provenance_cmd(args):
-    from signing.provenance import generate_provenance_predicates
-
-    summary = generate_provenance_predicates(
-        registry_dir=args.registry_dir,
-        publish_results_path=args.publish_results,
-        hub_repository=args.hub_repository,
-        hub_ref=args.hub_ref,
-        workflow_path=args.workflow_path,
-    )
-    print(f"SLSA provenance generation complete: scanned={summary.scanned}, written={summary.written}")
-    for output in summary.outputs:
-        print(f"  - {output}")
-
 def verify_attestations_cmd(args):
     from signing.verify import verify_published_artifacts, write_verification_report
 
@@ -141,6 +127,7 @@ def verify_attestations_cmd(args):
         cosign_bin=args.cosign,
         operation_id=args.operation_id,
         version=args.version,
+        expected_hub_commit=args.expected_hub_commit,
     )
     print(f"Signing verification complete: scanned={summary.scanned}, failures={len(summary.failures)}")
     for issue in summary.failures[:args.max_issues]:
@@ -151,7 +138,14 @@ def verify_attestations_cmd(args):
     if summary.failed:
         sys.exit(1)
     if args.report:
-        write_verification_report(args.report, args.registry_dir, args.publish_results, args.policy, summary)
+        write_verification_report(
+            args.report,
+            args.registry_dir,
+            args.publish_results,
+            args.policy,
+            summary,
+            args.expected_hub_commit,
+        )
         print(f"Signing verification report written: {args.report}")
 
 def sign_attest_cmd(args):
@@ -164,6 +158,7 @@ def sign_attest_cmd(args):
         cosign_bin=args.cosign,
         max_attempts=args.max_attempts,
         retry_delay_seconds=args.retry_delay_seconds,
+        expected_hub_commit=args.expected_hub_commit,
     )
     print(f"Signing and attestation complete: scanned={summary.scanned}, signed={summary.signed}, failures={len(summary.failures)}")
     for issue in summary.failures[:args.max_issues]:
@@ -181,6 +176,7 @@ def publish_catalog_cmd(args):
         registry_dir=args.registry_dir,
         publish_results_path=args.publish_results,
         verification_report_path=args.verification_report,
+        slsa_verification_report_path=args.slsa_verification_report,
         signing_policy_path=args.policy,
         registry_url=args.registry,
         package_prefix=args.package_prefix,
@@ -228,14 +224,6 @@ def main():
     publish_parser.add_argument("--package-prefix", default="biochef-plugins-", help="OCI package name prefix. Use a test-only prefix for sandbox registries.")
     publish_parser.set_defaults(func=publish_cmd)
 
-    provenance_parser = subparsers.add_parser("provenance")
-    provenance_parser.add_argument("--registry-dir", default=REGISTRY_DIR, help="Registry bundle directory to scan")
-    provenance_parser.add_argument("--publish-results", help="Path to publish-results.json. Defaults to <registry-dir>/publish-results.json")
-    provenance_parser.add_argument("--hub-repository", help="GitHub repository used for the hub checkout")
-    provenance_parser.add_argument("--hub-ref", help="Hub branch, tag, or commit requested by the workflow")
-    provenance_parser.add_argument("--workflow-path", help="GitHub workflow path used to derive local builder identity")
-    provenance_parser.set_defaults(func=provenance_cmd)
-
     verify_parser = subparsers.add_parser("verify-attestations")
     verify_parser.add_argument("--registry-dir", default=REGISTRY_DIR, help="Registry bundle directory to scan")
     verify_parser.add_argument("--publish-results", help="Path to publish-results.json. Defaults to <registry-dir>/publish-results.json")
@@ -244,6 +232,7 @@ def main():
     verify_parser.add_argument("--operation-id", help="Verify only one published operation id")
     verify_parser.add_argument("--version", help="Verify only one published operation version")
     verify_parser.add_argument("--report", help="Write a machine-readable verification report JSON")
+    verify_parser.add_argument("--expected-hub-commit", required=True, help="Exact runner-resolved Hub workflow commit expected in build evidence")
     verify_parser.add_argument("--max-issues", type=int, default=20, help="Maximum failures to print")
     verify_parser.set_defaults(func=verify_attestations_cmd)
 
@@ -254,6 +243,7 @@ def main():
     sign_parser.add_argument("--cosign", default="cosign", help="Cosign executable to use")
     sign_parser.add_argument("--max-attempts", type=int, default=2, help="Maximum attempts for each Cosign write and verification operation")
     sign_parser.add_argument("--retry-delay-seconds", type=int, default=5, help="Base retry delay between attempts")
+    sign_parser.add_argument("--expected-hub-commit", required=True, help="Exact runner-resolved Hub workflow commit expected in build evidence")
     sign_parser.add_argument("--max-issues", type=int, default=20, help="Maximum failures to print")
     sign_parser.set_defaults(func=sign_attest_cmd)
 
@@ -262,6 +252,7 @@ def main():
     catalog_parser.add_argument("--registry-dir", default=REGISTRY_DIR, help="Registry bundle directory to scan")
     catalog_parser.add_argument("--publish-results", help="Path to publish-results.json. Defaults to <registry-dir>/publish-results.json")
     catalog_parser.add_argument("--verification-report", help="Path to signing-verification-report.json. Defaults to <registry-dir>/signing-verification-report.json")
+    catalog_parser.add_argument("--slsa-verification-report", required=True, help="Path to the independently verified official SLSA report")
     catalog_parser.add_argument("--policy", required=True, help="Signing verification policy JSON")
     catalog_parser.add_argument("--package-prefix", default="biochef-plugins-", help="OCI package name prefix")
     catalog_parser.add_argument("--catalog-version", help="Immutable catalog tag. Defaults to catalog-<run id>-<sha> in GitHub Actions")

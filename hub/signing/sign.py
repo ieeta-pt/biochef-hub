@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Callable
 
 from publish.publish import read_publish_results
-from signing.provenance import SLSA_PREDICATE_TYPE
 from signing.verify import (
     VerificationIssue,
     check_published_evidence,
@@ -29,7 +28,7 @@ class SigningSummary:
         return bool(self.failures)
 
 
-def sign_and_attest_published_artifacts(registry_dir: str | Path = "registry", publish_results_path: str | Path | None = None, policy_path: str | Path | None = None, cosign_bin: str = "cosign", max_attempts: int = 2, retry_delay_seconds: int = 5) -> SigningSummary:
+def sign_and_attest_published_artifacts(registry_dir: str | Path = "registry", publish_results_path: str | Path | None = None, policy_path: str | Path | None = None, cosign_bin: str = "cosign", max_attempts: int = 2, retry_delay_seconds: int = 5, expected_hub_commit: str | None = None) -> SigningSummary:
     registry_path = Path(registry_dir).resolve()
     if not registry_path.is_dir():
         raise SigningError(f"Registry directory does not exist: {registry_path}")
@@ -53,6 +52,7 @@ def sign_and_attest_published_artifacts(registry_dir: str | Path = "registry", p
         registry_dir=registry_path,
         publish_results_path=results_path,
         policy_path=policy,
+        expected_hub_commit=expected_hub_commit,
     )
     if preflight.failed:
         summary.failures.extend(preflight.failures)
@@ -124,27 +124,6 @@ def _sign_and_attest(
             policy_path,
             "cyclonedx",
             bundle_dir / "sbom.cdx.json",
-            cosign_bin,
-        ),
-    )
-    _run(
-        [
-            cosign_bin,
-            "attest",
-            "--yes",
-            "--type",
-            SLSA_PREDICATE_TYPE,
-            "--predicate",
-            str(bundle_dir / "provenance.slsa.json"),
-            ref,
-        ],
-        max_attempts=max_attempts,
-        retry_delay_seconds=retry_delay_seconds,
-        postcondition=lambda: verify_cosign_attestation(
-            ref,
-            policy_path,
-            SLSA_PREDICATE_TYPE,
-            bundle_dir / "provenance.slsa.json",
             cosign_bin,
         ),
     )

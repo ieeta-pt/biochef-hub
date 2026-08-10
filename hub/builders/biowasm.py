@@ -202,11 +202,22 @@ def read_observations(container):
                 f"could not read BioWASM observations: {exc}"
             ) from exc
         payload = {}
+        observed_paths = set()
         for item in observations.get("license_files") or []:
+            if not isinstance(item, dict):
+                raise ContainerEvidenceError(
+                    "container license evidence entry is malformed"
+                )
             archive_path = item.get("archive_path")
-            source = root / archive_path if isinstance(archive_path, str) else None
+            source = safe_child_path(
+                root,
+                archive_path,
+                "container license evidence archive path",
+            )
+            normalized_path = source.relative_to(root.resolve()).as_posix()
             if (
-                source is None
+                normalized_path != archive_path
+                or normalized_path in observed_paths
                 or source.is_symlink()
                 or not source.is_file()
                 or file_digest(source) != item.get("digest")
@@ -214,7 +225,8 @@ def read_observations(container):
                 raise ContainerEvidenceError(
                     "container license evidence is missing or has an invalid digest"
                 )
-            payload[archive_path] = source.read_bytes()
+            observed_paths.add(normalized_path)
+            payload[normalized_path] = source.read_bytes()
         return observations, payload
 
 
