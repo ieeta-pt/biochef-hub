@@ -1,0 +1,5 @@
+{
+  "base_image": "emscripten/emsdk:2.0.25@sha256:acdbc0e16b78275d36d6b0dd67973fd0ff04a50fcd45bc3066d1727f3d90aa4f",
+  "biowasm_repository": "https://github.com/biowasm/biowasm.git",
+  "biowasm_commit": "bcad3232544f9d16744bf3b66c27a75cad9b9971"
+}
