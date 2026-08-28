@@ -27,29 +27,50 @@ const wasmPath = path.join(moduleDir, path.basename(modulePath, ".js") + ".wasm"
 const wasmBinary = fs.readFileSync(wasmPath);
 const factory = (await import(modulePath)).default;
 
+// Emscripten's ErrnoError carries `name` and `errno` and no `message`, so the
+// obvious String(err.message || err) renders it as "[object Object]" -- which is
+// what this reported the first time a stdin case failed, and told nobody
+// anything.
+function describe(err) {
+  if (err === null || err === undefined) return "unknown error";
+  const parts = [];
+  if (err.name) parts.push(err.name);
+  if (err.message) parts.push(err.message);
+  if (err.errno !== undefined) parts.push(`errno=${err.errno}`);
+  if (err.status !== undefined) parts.push(`status=${err.status}`);
+  return parts.length ? parts.join(" ") : String(err);
+}
+
 const results = [];
 
 for (const testCase of job.cases) {
   const record = { stdout: "", stderr: "", code: 0, files: {}, error: null };
   try {
+    // stdin has to be handed to the factory, not installed afterwards. Calling
+    // FS.init() on the resolved module throws ErrnoError -- the filesystem is
+    // already initialised by then -- and the damage if that throw is swallowed
+    // is worse than a crash: the program still runs and reads zero bytes, so
+    // every stdin-driven tool in the catalogue would look like it diverged
+    // when only the harness had failed to deliver the input. Emscripten's own
+    // FS.init picks up Module['stdin'] during startup, which is this.
+    const stdinBytes =
+      testCase.stdin !== undefined && testCase.stdin !== null
+        ? Buffer.from(testCase.stdin, "base64")
+        : null;
+    let stdinCursor = 0;
+
     const Module = await factory({
       wasmBinary,
       noInitialRun: true,
+      ...(stdinBytes
+        ? { stdin: () => (stdinCursor < stdinBytes.length ? stdinBytes[stdinCursor++] : null) }
+        : {}),
       print: (line) => { record.stdout += line + "\n"; },
       printErr: (line) => { record.stderr += line + "\n"; },
     });
 
     for (const [name, b64] of Object.entries(testCase.files || {})) {
       Module.FS.writeFile(name, Buffer.from(b64, "base64"));
-    }
-
-    if (testCase.stdin !== undefined && testCase.stdin !== null) {
-      // Emscripten reads stdin through a callback returning one byte at a time,
-      // and null means EOF. Installing it before callMain is the only chance:
-      // the runtime wires up the streams during startup.
-      const bytes = Buffer.from(testCase.stdin, "base64");
-      let cursor = 0;
-      Module.FS.init(() => (cursor < bytes.length ? bytes[cursor++] : null), null, null);
     }
 
     try {
@@ -66,22 +87,42 @@ for (const testCase of job.cases) {
       // an abort arrives as something else entirely. Both are outcomes to
       // compare, not harness failures.
       record.code = err && err.status !== undefined ? err.status : 1;
-      if (err && err.status === undefined) record.error = String(err.message || err);
+      if (err && err.status === undefined) record.error = describe(err);
     }
 
+    // Matched by stem, exactly as the native side matches it. A bundle declares
+    // an output called "out" and the tool writes "out.txt"; reading the literal
+    // name here while the native side searched by stem would report every such
+    // tool as divergent, with one side holding the file and the other null.
+    // The two sides must apply the SAME rule or the comparison is meaningless.
+    let entries = [];
+    try {
+      entries = Module.FS.readdir(".").filter((e) => e !== "." && e !== "..");
+    } catch { /* no working directory listing; every collect below yields null */ }
+
     for (const name of testCase.collect || []) {
-      try {
-        record.files[name] = Buffer.from(Module.FS.readFile(name)).toString("base64");
-      } catch {
+      const wanted = name.toLowerCase();
+      const hit = entries.find((entry) => {
+        const dot = entry.lastIndexOf(".");
+        const stem = dot > 0 ? entry.slice(0, dot) : entry;
+        return stem.toLowerCase() === wanted;
+      });
+      if (hit === undefined) {
         // Absent is a result: the native side may not have produced it either,
         // and that agreement is what the comparison is for.
+        record.files[name] = null;
+        continue;
+      }
+      try {
+        record.files[name] = Buffer.from(Module.FS.readFile(hit)).toString("base64");
+      } catch {
         record.files[name] = null;
       }
     }
   } catch (err) {
     // Instantiation itself failed. Distinct from the tool exiting non-zero, and
     // reported as such so it cannot be read as a divergence in the tool.
-    record.error = String((err && err.message) || err);
+    record.error = describe(err);
     record.code = null;
   }
   results.push(record);

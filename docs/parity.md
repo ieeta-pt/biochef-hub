@@ -84,6 +84,29 @@ A comparison that silently stops comparing looks exactly like a catalogue that
 agrees, so the harness is asked to prove it still fails on a divergence before
 its report is believed. CI runs this immediately before the report.
 
+```
+node hub/parity/runner_check.mjs
+```
+
+checks the WASM runner itself against a stub module: that stdin actually reaches
+the program, and that a declared output is matched by **stem** the way the
+native side matches it. Both of those were wrong in the first version, both were
+invisible from reading the code, and both were found by compiling a purpose-built
+probe — a program that reads stdin, reports the byte count, and writes
+`out.txt` — to WASM and comparing it against its native build:
+
+- stdin was installed with `FS.init()` on the **resolved** module, which throws
+  `ErrnoError` because the filesystem is already initialised by then. Worse than
+  the throw: the program still ran and read **zero bytes**, so every
+  stdin-driven tool in the catalogue would have looked like it diverged when
+  only the harness had failed to feed it. Emscripten picks stdin up from
+  `Module['stdin']` during its own startup, so it has to be handed to the
+  factory.
+- declared file outputs were read by their **literal** name while the native
+  side searched by stem. A bundle declaring `out` against a tool writing
+  `out.txt` would have held a file on one side and `null` on the other — a
+  divergence invented entirely by the harness.
+
 End to end, the harness was validated against ksw2 by rebuilding its WASM side
 with a different default match score and confirming the report said `DIFFER`
 with the two scores side by side, and that the command exited non-zero. That
@@ -91,6 +114,11 @@ exercise found a real bug in `run_wasm.mjs`: `callMain` **returns** main's value
 rather than throwing when a program reports failure by returning, so reading
 only the thrown `ExitStatus` recorded 0 for every such tool and would have
 reported false divergences across the catalogue.
+
+Three harness bugs, then, and every one of them would have produced false
+divergences on tools that were in fact fine. That is the failure mode worth
+guarding against here: a parity gate that cries wolf gets switched off, and a
+switched-off gate is indistinguishable from the one that was never written.
 
 ## What it does not cover
 

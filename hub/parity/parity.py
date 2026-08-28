@@ -145,8 +145,16 @@ def _run_native(binary, args, files, stdin, collect, timeout):
                     "error": f"timed out after {timeout}s"}
         produced = {}
         for name in collect:
+            # The copied binary is excluded, because the WASM side's filesystem
+            # has no binary in it. Leaving it in would let an operation whose
+            # declared output shares a stem with its executable match here and
+            # find nothing there -- an asymmetry invented by the harness.
+            candidates = [
+                f for f in work.iterdir()
+                if f.is_file() and f.name != local_binary.name
+            ]
             match = next(
-                (f for f in work.iterdir() if f.is_file() and f.stem.lower() == name.lower()),
+                (f for f in candidates if f.stem.lower() == name.lower()),
                 None,
             )
             produced[name] = (
@@ -184,6 +192,15 @@ def _run_wasm_batch(module_js, cases, timeout):
                 ["node", str(NODE_RUNNER), str(job), str(out)],
                 check=True, capture_output=True, timeout=timeout * max(1, len(cases)),
             )
+        except FileNotFoundError as exc:
+            # No node. Worth its own message: the published WASM build is
+            # JavaScript plus a .wasm file, so there is nothing to run it with,
+            # and a bare FileNotFoundError traceback names neither the problem
+            # nor the fix.
+            raise RuntimeError(
+                "node was not found, and the published WASM build cannot be run "
+                "without a JavaScript runtime. Install node (CI uses 20)."
+            ) from exc
         except subprocess.CalledProcessError as exc:
             raise RuntimeError(
                 f"the WASM runner failed: {exc.stderr.decode('utf-8', 'replace')[:800]}"
@@ -229,7 +246,15 @@ def discover(registry_dir):
             bundle_path = version_dir / "bundle.json"
             if not bundle_path.is_file():
                 continue
-            bundle = json.loads(bundle_path.read_text())
+            try:
+                bundle = json.loads(bundle_path.read_text())
+            except (ValueError, OSError) as exc:
+                # A corrupt bundle is a real problem and belongs in the report,
+                # but it must not take the rest of the catalogue down with it.
+                # It surfaces below as an in-scope skip, which fails the run.
+                found.append((version_dir, {"id": f"{operation_dir.name}/{version_dir.name}",
+                                            "__unreadable__": str(exc)}))
+                continue
             found.append((version_dir, bundle))
     return found
 
@@ -246,6 +271,11 @@ def run_parity(registry_dir, timeout=30, compare_stderr=False, minimum=1):
 
         record = {"operation": name, "version": version_dir.name,
                   "outcome": Outcome.SKIPPED, "reason": None, "differences": []}
+
+        if bundle.get("__unreadable__"):
+            record["reason"] = f"bundle.json could not be read: {bundle['__unreadable__']}"
+            records.append(record)
+            continue
 
         modes = (bundle.get("runtime") or {}).get("modes") or []
         if not ("wasm" in modes and "native" in modes):

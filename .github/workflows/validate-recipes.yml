@@ -84,7 +84,9 @@ jobs:
         # Before trusting the report below. These checks need no toolchain and
         # take no time, and they are the difference between "the catalogue
         # agrees" and "the comparison stopped comparing".
-        run: python ./.hub/hub/hub.py parity --self-test
+        run: |
+          python ./.hub/hub/hub.py parity --self-test
+          node ./.hub/hub/parity/runner_check.mjs
 
       - name: Compare the WASM and native builds
         # Every recipe declaring both runtimes promises an operation means the

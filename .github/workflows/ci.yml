@@ -52,3 +52,9 @@ jobs:
 
       - name: The parity harness can still see a divergence
         run: python hub/hub.py parity --self-test
+
+      - name: The WASM runner delivers stdin and matches outputs by stem
+        # Two things the runner got wrong, both invisible from reading it and
+        # both found by compiling a probe to WASM and comparing it with its
+        # native build. This pins them without needing a toolchain.
+        run: node hub/parity/runner_check.mjs
