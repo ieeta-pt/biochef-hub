@@ -1,0 +1,54 @@
+name: CI
+
+# The hub's own code has never been checked by CI. Both other workflows here are
+# `workflow_call` and run only when biochef-recipes invokes them, pinned at
+# @master -- so a change to this repository is exercised for the first time
+# AFTER it is merged, in someone else's pull request.
+#
+# That is a bad position for a repository whose job is deciding what gets
+# published, and it is a worse one for a check that is supposed to fail loudly:
+# a parity harness whose own correctness is unverified is exactly the thing it
+# exists to prevent.
+#
+# Deliberately narrow. This compiles the hub's modules and asks the parity
+# harness to prove it can still see a divergence. It does not run the recipe
+# build or the tool tests, which need Docker, emscripten and a catalogue, and
+# which belong in the reusable workflow where they already are.
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  hub:
+    name: hub modules and the parity self-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: hub/requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install the pinned requirements
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r hub/requirements.txt
+
+      - name: Every hub module parses
+        # -f because compileall SKIPS files with an up-to-date .pyc, and a
+        # skipped file is a pass. A fresh checkout has none, but a check whose
+        # correctness depends on that is one restored cache away from decorative.
+        run: python -m compileall -q -f $(git ls-files 'hub/*.py')
+
+      - name: The WASM runner parses
+        run: node --check hub/parity/run_wasm.mjs
+
+      - name: The parity harness can still see a divergence
+        run: python hub/hub.py parity --self-test
