@@ -58,6 +58,38 @@ def build_cmd(args):
     if not recipes: return
     build_plugins(recipes, BUILD_DIR, REGISTRY_DIR)
 
+def parity_cmd(args):
+    from parity.parity import run_parity, format_report, self_test
+
+    if args.self_test:
+        failures = self_test()
+        for failure in failures:
+            print(f"  [FAIL] {failure}")
+        if failures:
+            print(f"The parity harness failed {len(failures)} of its own checks")
+            sys.exit(1)
+        print("Parity harness self-check passed: a divergence still fails a report")
+        return
+
+    report = run_parity(
+        args.registry_dir,
+        timeout=args.timeout,
+        compare_stderr=args.compare_stderr,
+        minimum=args.min_compared,
+    )
+    print(format_report(report))
+
+    if args.report:
+        with open(args.report, "w") as f:
+            json.dump(report, f, indent=2)
+        print(f"Wrote parity report to {args.report}")
+
+    if not report["ok"]:
+        # sys.exit rather than raise: the report above IS the diagnosis, and a
+        # traceback on top of it only buries the part a reader needs.
+        sys.exit(1)
+
+
 def test_cmd(args):
     from tests.test import test_tools
     from utils.type_definitions import validate_type_examples
@@ -208,6 +240,21 @@ def main():
 
     test_parser = subparsers.add_parser("test")
     test_parser.set_defaults(func=test_cmd)
+
+    parity_parser = subparsers.add_parser("parity")
+    parity_parser.add_argument("--registry-dir", default=REGISTRY_DIR, help="Registry bundle directory to scan")
+    parity_parser.add_argument("--report", help="Write a machine-readable parity report JSON")
+    parity_parser.add_argument("--timeout", type=int, default=30, help="Per-invocation timeout in seconds")
+    parity_parser.add_argument("--compare-stderr", action="store_true", help="Also require stderr to match")
+    # Zero by default, because the guard that matters is elsewhere: an operation
+    # whose recipe declared both runtimes and which could not be compared fails
+    # the report on its own. A pull request touching only single-runtime recipes
+    # genuinely has nothing to compare and must not fail for it. A job that runs
+    # the whole catalogue passes a real number here, so that "compared nothing"
+    # cannot look like "compared everything".
+    parity_parser.add_argument("--min-compared", type=int, default=0, help="Fail if fewer operations than this were actually compared and matched")
+    parity_parser.add_argument("--self-test", action="store_true", help="Check the harness still fails on a divergence, and exit")
+    parity_parser.set_defaults(func=parity_cmd)
 
     sbom_parser = subparsers.add_parser("sbom")
     sbom_parser.add_argument("--registry-dir", default=REGISTRY_DIR, help="Registry bundle directory to scan")
