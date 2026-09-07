@@ -7,6 +7,7 @@ from builders.bundle_evidence import (
     collect_git_dependencies,
     command_output,
     git_source_evidence,
+    file_digest
 )
 from builders.container import safe_child_path
 
@@ -84,6 +85,12 @@ def build(tool_name, recipe_dir, settings, source, output_dir="build"):
             commit=commit,
         )
         evidence["dependencies"] = collect_git_dependencies(source_dir)
+        evidence["scripts"] = [
+            {
+                "path": build_script,
+                "digest": file_digest(recipe_script),
+            }
+        ]
         return {
             "output_dir": str(destination),
             "source_dir": str(source_dir),
