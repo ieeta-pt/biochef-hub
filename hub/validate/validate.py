@@ -13,6 +13,10 @@ license_ref = re.compile(
     r"^(?:DocumentRef-[A-Za-z0-9.-]+:)?LicenseRef-[A-Za-z0-9.-]+$"
 )
 
+def validate_build_targets(field, value, error):
+    if not value.get("wasm") and not value.get("native"):
+        error(field, "build must define at least one of 'wasm' or 'native'")
+
 def validate_output_mode(field, value, error):
     mode = value.get("mode")
     types = value.get("types", [])
@@ -207,9 +211,11 @@ schema = {
     },
     'build': {
         'type': 'dict',
+        'check_with': validate_build_targets,
         'schema': {
             'wasm': {
                 'type': 'dict',
+                'required': False,
                 'schema': {
                     'strategy': {
                         'type': 'string',
