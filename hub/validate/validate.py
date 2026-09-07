@@ -236,9 +236,8 @@ schema = {
             'native': {
                 'type': 'dict',
                 'schema': {
-                    'buildsystem': {'type': 'string', 'allowed': ['make']},
-                    'workDir': {'type': 'string', 'check_with': validate_safe_relative_path, 'required': False},
                     'outputDir': {'type': 'string', 'check_with': validate_safe_relative_path, 'required': False},
+                    'buildScript': {'type': 'string', 'check_with': validate_safe_relative_path, 'required': True},
                 },
                 'required': False
             }

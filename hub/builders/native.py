@@ -11,12 +11,12 @@ from builders.bundle_evidence import (
 from builders.container import safe_child_path
 
 
-def build(tool_name, settings, source, output_dir="build"):
-    buildsystem = settings['buildsystem']
+def build(tool_name, recipe_dir, settings, source, output_dir="build"):
+    # buildsystem = settings['buildsystem']
     repo_url, tag, commit = source
     evidence = {
         "builder": "native",
-        "buildsystem": buildsystem,
+        # "buildsystem": buildsystem,
         "source": {},
         "toolchain": {
             "name": "make",
@@ -24,8 +24,8 @@ def build(tool_name, settings, source, output_dir="build"):
         },
         "isolation": {"containerized": False},
     }
-    if buildsystem != "make":
-        return {"output_dir": "", "evidence": evidence}
+    # if buildsystem != "make":
+    #     return {"output_dir": "", "evidence": evidence}
 
     base_dir = Path.cwd()
     source_dir = Path(output_dir).resolve() / "_sources" / "native" / tool_name
@@ -45,9 +45,22 @@ def build(tool_name, settings, source, output_dir="build"):
                 check=True,
             )
 
-        workdir = settings.get("workDir", ".")
-        workdir_path = safe_child_path(source_dir, workdir, "native workDir")
-        subprocess.run(["make"], cwd=workdir_path, check=True)
+        build_script = settings["buildScript"]
+        recipe_script = safe_child_path(recipe_dir, build_script, "buildScript")
+        if not recipe_script.is_file() or recipe_script.is_symlink():
+            raise RuntimeError(f"Build script is missing or unsafe: {recipe_script}")
+        source_script = source_dir / recipe_script.name
+        if source_script.exists():
+            raise RuntimeError(
+                f"Build script would replace an upstream file: {source_script}"
+            )
+        shutil.copyfile(recipe_script, source_script)
+
+        subprocess.run(
+            ["bash", f"./{source_script.name}"],
+            cwd=source_dir,
+            check=True,
+        )
 
         output_name = settings.get("outputDir", ".")
         source_output = safe_child_path(
