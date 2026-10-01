@@ -342,6 +342,14 @@ def formulation_components(evidence):
             if component and (key, component.get("version")) not in seen:
                 seen.add((key, component.get("version")))
                 components.append(component)
+        for build_tool in build.get("build_tools") or []:
+            component = toolchain_component(build_tool)
+            if not component:
+                continue
+            key = ("build_tool", component.get("name"), component.get("version"))
+            if key not in seen:
+                seen.add(key)
+                components.append(component)
     return components
 
 
@@ -383,15 +391,17 @@ def framework_component(framework):
 def toolchain_component(toolchain):
     if not isinstance(toolchain, dict):
         return None
+    declared_tool = toolchain.get("observation_scope") == "declared-tool-available-in-builder"
     return {
         "type": "application",
-        "bom-ref": f"build:toolchain:{toolchain.get('name', 'unknown')}",
+        "bom-ref": f"build:{'declared-tool' if declared_tool else 'toolchain'}:{toolchain.get('name', 'unknown')}",
         "name": toolchain.get("name") or "build-toolchain",
         "version": toolchain.get("version") or toolchain.get("commit"),
         "properties": properties(
             {
                 "biochef.source.commit": toolchain.get("commit"),
                 "biochef.emsdk.commit": toolchain.get("emsdk_commit"),
+                "biochef.observation.scope": toolchain.get("observation_scope"),
             }
         ),
     }

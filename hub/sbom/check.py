@@ -212,7 +212,7 @@ def check_runtime(runtime, build, declared_source, summary, bundle_name):
     require(
         summary,
         bundle_name,
-        actual.get("kind") in {"git", "vendored"},
+        actual.get("kind") in {"git", "vendored", "file"},
         "SOURCE_IDENTITY",
         f"{runtime} build has no actual source identity",
     )
@@ -246,13 +246,44 @@ def check_runtime(runtime, build, declared_source, summary, bundle_name):
         )
 
     toolchain = build.get("toolchain") or {}
-    require(
-        summary,
-        bundle_name,
-        bool(toolchain.get("name")) and bool(toolchain.get("version")),
-        "TOOLCHAIN_IDENTITY",
-        f"{runtime} build has no exact toolchain name and version",
-    )
+    build_tools = build.get("build_tools") or []
+    if runtime == "native":
+        require(
+            summary,
+            bundle_name,
+            bool(build_tools)
+            and all(
+                isinstance(item, dict)
+                and bool(item.get("name"))
+                and bool(item.get("version"))
+                and item.get("observation_scope") == "declared-tool-available-in-builder"
+                for item in build_tools
+            ),
+            "BUILD_COMMAND_OBSERVATION",
+            "native build has no versioned declared-tool observation",
+        )
+        scripts = build.get("scripts") or []
+        require(
+            summary,
+            bundle_name,
+            bool(scripts)
+            and all(
+                isinstance(item, dict)
+                and bool(item.get("path"))
+                and is_sha256_digest(item.get("digest"))
+                for item in scripts
+            ),
+            "BUILD_SCRIPT_IDENTITY",
+            "native build has no digest-bound recipe script",
+        )
+    else:
+        require(
+            summary,
+            bundle_name,
+            bool(toolchain.get("name")) and bool(toolchain.get("version")),
+            "TOOLCHAIN_IDENTITY",
+            f"{runtime} build has no exact toolchain name and version",
+        )
     if runtime == "wasm":
         require(
             summary,

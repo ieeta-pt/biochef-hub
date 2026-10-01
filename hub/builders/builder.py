@@ -89,19 +89,16 @@ def build_plugins(file_paths, build_dir, registry_dir):
 
         outputs = {}
         build_runtimes = recipe['build'].keys()
+        recipe_dir = path.parent
         for runtime in build_runtimes:
             if runtime == "wasm":
-                outputs["wasm"] = build_wasm(recipe, path.parent, build_dir)
+                outputs["wasm"] = build_wasm(recipe, recipe_dir, build_dir)
             elif runtime == "native":
-                source = (
-                    recipe["source"]["repo"],
-                    recipe["source"].get("tag"),
-                    recipe["source"].get("commit")
-                )
                 outputs["native"] = build_native(
                     recipe["name"],
+                    recipe_dir,
                     recipe['build']["native"],
-                    source,
+                    recipe["source"],
                     output_dir=build_dir
                 )
 
