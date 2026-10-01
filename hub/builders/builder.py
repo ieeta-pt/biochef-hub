@@ -95,7 +95,7 @@ def build_plugins(file_paths, build_dir, registry_dir):
                 outputs["wasm"] = build_wasm(recipe, recipe_dir, build_dir)
             elif runtime == "native":
                 outputs["native"] = build_native(
-                    recipe["name"],
+                    recipe["id"],
                     recipe_dir,
                     recipe['build']["native"],
                     recipe["source"],
