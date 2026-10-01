@@ -4,10 +4,12 @@ from pathlib import Path
 import re
 from urllib.parse import urlparse
 from license_expression import ExpressionError, get_spdx_licensing
+from builders.native import BUILD_TOOLS
 
 allowed_input_types = get_allowed_input_types()
 allowed_output_types = get_allowed_output_types()
 allowed_parameter_types = ['string', 'integer', 'float', 'flag']
+allowed_native_build_tools = sorted(BUILD_TOOLS)
 spdx_licensing = get_spdx_licensing()
 license_ref = re.compile(
     r"^(?:DocumentRef-[A-Za-z0-9.-]+:)?LicenseRef-[A-Za-z0-9.-]+$"
@@ -102,8 +104,13 @@ def builder_source_errors(recipe: dict) -> list[str]:
     source = recipe.get("source") or {}
     build = recipe.get("build") or {}
     errors = []
-    if "native" in build and not source.get("repo"):
-        errors.append("native builds currently require source.repo + source.commit")
+    if "native" in build and not (
+        source.get("repo")
+        or (source.get("url") and source.get("sha256"))
+    ):
+        errors.append(
+            "native builds require source.repo + source.commit or source.url + source.sha256"
+        )
     wasm = build.get("wasm") or {}
     if wasm.get("strategy") == "emscripten" and not source.get("repo"):
         errors.append("Emscripten builds currently require source.repo + source.commit")
@@ -238,6 +245,12 @@ schema = {
                 'schema': {
                     'outputDir': {'type': 'string', 'check_with': validate_safe_relative_path, 'required': False},
                     'buildScript': {'type': 'string', 'check_with': validate_safe_relative_path, 'required': True},
+                    'buildTools': {
+                        'type': 'list',
+                        'schema': {'type': 'string', 'allowed': allowed_native_build_tools},
+                        'minlength': 1,
+                        'required': True,
+                    },
                 },
                 'required': False
             }
