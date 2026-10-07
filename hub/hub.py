@@ -76,6 +76,7 @@ def parity_cmd(args):
         timeout=args.timeout,
         compare_stderr=args.compare_stderr,
         minimum=args.min_compared,
+        max_cases=args.max_cases,
     )
     print(format_report(report))
 
@@ -253,6 +254,7 @@ def main():
     # the whole catalogue passes a real number here, so that "compared nothing"
     # cannot look like "compared everything".
     parity_parser.add_argument("--min-compared", type=int, default=0, help="Fail if fewer operations than this were actually compared and matched")
+    parity_parser.add_argument("--max-cases", type=int, default=8, help="Invocations per operation: the required-only one, then one per optional parameter on its own")
     parity_parser.add_argument("--self-test", action="store_true", help="Check the harness still fails on a divergence, and exit")
     parity_parser.set_defaults(func=parity_cmd)
 

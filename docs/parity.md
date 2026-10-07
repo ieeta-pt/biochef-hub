@@ -38,10 +38,13 @@ so a genuine failure leaves the workflow green. That last one is
 python hub/hub.py parity --registry-dir registry --report parity-report.json
 ```
 
-For every bundle whose recipe declares both runtimes, it builds one invocation
-from the operation's required parameters and its declared example inputs, runs
-that same invocation against both builds, and compares stdout, the exit status,
-and any declared file outputs.
+For every bundle whose recipe declares both runtimes, it builds up to
+`--max-cases` invocations (8 by default) from the operation's declared example
+inputs: one with the required parameters only, then one for each optional
+parameter added on its own, in declared order. It runs every invocation against
+both builds and compares stdout, the exit status, and any declared file outputs.
+A divergence in any of them fails the operation, and the report shows the
+invocation that diverged.
 
 Both runtimes are handed byte-identical inputs and the identical argument
 strings — file arguments are relative names, so a tool that echoes its own
@@ -122,13 +125,18 @@ switched-off gate is indistinguishable from the one that was never written.
 
 ## What it does not cover
 
-**One invocation per operation**, built from the required parameters. Anything
-reachable only through an *optional* parameter is not exercised.
+**Each optional parameter once, alone, with one value.** Optional parameters
+are now exercised, but never in combination, never with more than one value,
+and only up to the case cap — an operation with more optional parameters than
+`--max-cases` allows has the rest skipped, in declared order. A value comes
+from the parameter's default, or from a fixed per-operation example for its
+type.
 
 ksw2 is the clearest example, and the most uncomfortable one. It selects among
 seven alignment implementations — scalar and SSE variants of the same
 algorithms — through an optional `-t`, so the harness compares the default path
-and nothing else. That is precisely where divergence is most plausible: on x86
+and one other — `-t` is now set once, to a single example value, not to each of
+the seven. That is precisely where divergence is most plausible: on x86
 the native build is compiled `-march=native` against real SSE, while the WASM
 build goes through emscripten's SSE-over-wasm-SIMD compatibility headers. Two
 implementations of the same intrinsics.
@@ -138,6 +146,7 @@ sequence lengths, four divergence rates, band-width and Z-drop variations, and
 seven adversarial shapes (homopolymers, tandem repeats, `N`s, one-long-one-short)
 found **no divergence**. That is a real result for ksw2 and not a general one.
 
-Covering optional parameters properly needs cases declared per operation, which
-needs a recipe schema key that does not exist yet —
+Covering optional parameters properly — specific values, combinations, the
+inputs each one needs — still needs cases declared per operation, which needs a
+recipe schema key that does not exist yet —
 [#39](https://github.com/ieeta-pt/biochef-hub/issues/39).

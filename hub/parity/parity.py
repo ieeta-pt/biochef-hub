@@ -72,11 +72,16 @@ def _example_parameter_values(operation_id):
     }
 
 
-def build_invocation(bundle, example_inputs):
+def build_invocation(bundle, example_inputs, include=()):
     """Turn a bundle into one concrete invocation, or explain why it cannot.
 
     Returns (args, files, stdin, collect, reason). `reason` is non-None when the
     operation cannot be exercised, and is reported rather than swallowed.
+
+    The required parameters always, plus any optional parameter named in
+    `include`, in declared order and before the inputs -- flagged arguments
+    before positional ones, the same order the agent emits. With nothing
+    included this is exactly the single invocation the harness always ran.
     """
     values = _example_parameter_values(bundle.get("id", bundle.get("name", "")))
     args = []
@@ -84,7 +89,7 @@ def build_invocation(bundle, example_inputs):
     stdin = None
 
     for parameter in bundle.get("parameters", []):
-        if not parameter.get("required"):
+        if not parameter.get("required") and parameter.get("name") not in include:
             continue
         if parameter.get("flag"):
             args.append(parameter["flag"])
@@ -122,6 +127,62 @@ def build_invocation(bundle, example_inputs):
         if output.get("mode") == "file"
     ]
     return args, files, stdin, collect, None
+
+
+MAX_CASES = 8
+"""How many invocations per operation, the required-only one included.
+
+Each case runs on both runtimes, so this multiplies the job's time; the
+catalogue has operations with 60 parameters. Raised per run with --max-cases.
+"""
+
+
+def build_cases(bundle, example_inputs, max_cases=MAX_CASES):
+    """The required-only invocation, then one per optional parameter on its own.
+
+    Returns (cases, reason). The single invocation the harness used to run
+    included required parameters only, so none of the optional flags -- 467 of
+    the 469 `flag` parameters in the catalogue, and most of the rest -- was ever
+    exercised. One case per optional parameter, alone, reaches each of them
+    while staying linear in their number; combinations are hub#44's to choose.
+
+    Declared order, capped at `max_cases`, and the first case is always the
+    required-only one, so the original comparison is never lost to the cap.
+    """
+    args, files, stdin, collect, reason = build_invocation(bundle, example_inputs)
+    if reason:
+        return [], reason
+    cases = [{"label": "required only", "args": args, "files": files,
+              "stdin": stdin, "collect": collect}]
+    for parameter in bundle.get("parameters", []):
+        if len(cases) >= max_cases:
+            break
+        name = parameter.get("name")
+        if parameter.get("required") or not name:
+            continue
+        args, files, stdin, collect, reason = build_invocation(
+            bundle, example_inputs, include=(name,))
+        if reason:
+            continue
+        cases.append({"label": name, "args": args, "files": files,
+                      "stdin": stdin, "collect": collect})
+    return cases, None
+
+
+def aggregate(case_outcomes):
+    """One outcome for an operation from the outcomes of its cases.
+
+    A divergence in any case is a divergence of the operation: that is the
+    result the cases exist to find. Otherwise one case that ran and matched is
+    a match. Only when every case failed the same way on both runtimes is the
+    operation an agreed failure -- which, as before, does not count towards
+    the minimum.
+    """
+    if Outcome.DIVERGED in case_outcomes:
+        return Outcome.DIVERGED
+    if Outcome.MATCH in case_outcomes:
+        return Outcome.MATCH
+    return Outcome.AGREED_FAILURE
 
 
 def _run_native(binary, args, files, stdin, collect, timeout):
@@ -259,7 +320,8 @@ def discover(registry_dir):
     return found
 
 
-def run_parity(registry_dir, timeout=30, compare_stderr=False, minimum=1):
+def run_parity(registry_dir, timeout=30, compare_stderr=False, minimum=1,
+               max_cases=MAX_CASES):
     example_inputs = get_example_inputs()
     records = []
 
@@ -292,34 +354,63 @@ def run_parity(registry_dir, timeout=30, compare_stderr=False, minimum=1):
             records.append(record)
             continue
 
-        args, files, stdin, collect, reason = build_invocation(bundle, example_inputs)
+        cases, reason = build_cases(bundle, example_inputs, max_cases)
         if reason:
             record["reason"] = reason
             records.append(record)
             continue
 
-        case = {"args": args, "files": files, "stdin": stdin, "collect": collect}
-        record["invocation"] = " ".join([binary] + args)
+        record["invocation"] = " ".join([binary] + cases[0]["args"])
 
-        native = _run_native(native_path, args, files, stdin, collect, timeout)
         try:
-            wasm = _run_wasm_batch(wasm_path, [case], timeout)[0]
+            # One node process for every case of this operation.
+            wasm_results = _run_wasm_batch(
+                wasm_path,
+                [{k: case[k] for k in ("args", "files", "stdin", "collect")}
+                 for case in cases],
+                timeout)
         except RuntimeError as exc:
             record["reason"] = str(exc)
             records.append(record)
             continue
 
-        if native.get("error") or wasm.get("error"):
-            # One side could not be executed at all. Not a divergence in the
-            # tool, and not a pass either.
-            record["reason"] = (f"native: {native.get('error')}, "
-                                f"wasm: {wasm.get('error')}")
+        record["cases"] = []
+        diverged = None
+        unexecuted = None
+        for case, wasm in zip(cases, wasm_results):
+            native = _run_native(native_path, case["args"], case["files"],
+                                 case["stdin"], case["collect"], timeout)
+            invocation = " ".join([binary] + case["args"])
+            if native.get("error") or wasm.get("error"):
+                # A side that could not be executed at all is not a divergence
+                # and not a pass. Any such case leaves the operation uncompared,
+                # as the single invocation always did.
+                unexecuted = (f"{case['label']}: native: {native.get('error')}, "
+                              f"wasm: {wasm.get('error')}")
+                break
+            differences = compare(native, wasm, compare_stderr=compare_stderr)
+            if differences:
+                outcome = Outcome.DIVERGED
+                if diverged is None:
+                    diverged = (invocation, differences, native, wasm)
+            elif native["code"] != 0:
+                outcome = Outcome.AGREED_FAILURE
+            else:
+                outcome = Outcome.MATCH
+            record["cases"].append({"case": case["label"],
+                                    "invocation": invocation,
+                                    "outcome": outcome})
+
+        if unexecuted:
+            record["reason"] = unexecuted
             records.append(record)
             continue
 
-        differences = compare(native, wasm, compare_stderr=compare_stderr)
-        if differences:
-            record["outcome"] = Outcome.DIVERGED
+        record["outcome"] = aggregate([c["outcome"] for c in record["cases"]])
+        if record["outcome"] == Outcome.DIVERGED:
+            invocation, differences, native, wasm = diverged
+            # The report names the case that diverged, not the base one.
+            record["invocation"] = invocation
             record["differences"] = differences
             record["native"] = {"code": native["code"],
                                 "stdout": _excerpt(native["stdout"]),
@@ -327,12 +418,8 @@ def run_parity(registry_dir, timeout=30, compare_stderr=False, minimum=1):
             record["wasm"] = {"code": wasm["code"],
                               "stdout": _excerpt(wasm["stdout"]),
                               "stderr": _excerpt(wasm["stderr"])}
-        elif native["code"] != 0:
-            record["outcome"] = Outcome.AGREED_FAILURE
-            record["reason"] = f"both runtimes exited {native['code']}"
-            record["native"] = {"stderr": _excerpt(native["stderr"])}
-        else:
-            record["outcome"] = Outcome.MATCH
+        elif record["outcome"] == Outcome.AGREED_FAILURE:
+            record["reason"] = "every case failed the same way on both runtimes"
         records.append(record)
 
     return summarise(records, minimum)
@@ -479,4 +566,128 @@ def self_test():
     expect("a genuine match must pass",
            summarise([record(Outcome.MATCH)], 1)["ok"])
 
+    # The cases. A harness that quietly stopped varying its invocations would
+    # look exactly like one whose optional flags all agree.
+    inputs = {"TEXT": "x"}
+    bundle = {
+        "id": "self.test",
+        "parameters": [
+            {"name": "req", "flag": "-r", "type": "integer", "required": True},
+            {"name": "opt_flag", "flag": "-f", "type": "flag"},
+            {"name": "opt_int", "flag": "-n", "type": "integer"},
+            {"name": "opt_str", "flag": "-s", "type": "string", "default": "abc"},
+        ],
+        "io": {"inputs": [{"name": "in", "types": ["TEXT"], "mode": "file"}],
+               "outputs": []},
+    }
+    base = build_invocation(bundle, inputs)
+    cases, reason = build_cases(bundle, inputs, max_cases=10)
+    expect("the cases build without a reason", reason is None)
+    expect("the first case is exactly the old single invocation",
+           bool(cases) and cases[0]["args"] == base[0])
+    expect("one case per optional parameter, plus the base",
+           [c["label"] for c in cases] == ["required only", "opt_flag",
+                                            "opt_int", "opt_str"])
+    expect("the required parameter is in every case",
+           all("-r" in c["args"] for c in cases))
+    expect("each optional parameter appears in its own case only",
+           sum("-f" in c["args"] for c in cases) == 1
+           and sum("-n" in c["args"] for c in cases) == 1)
+    flag_case = next((c for c in cases if c["label"] == "opt_flag"), None)
+    expect("a flag-type parameter adds its flag and no value",
+           flag_case is not None and "-f" in flag_case["args"]
+           and flag_case["args"][flag_case["args"].index("-f") + 1] == "input_in")
+    str_case = next((c for c in cases if c["label"] == "opt_str"), None)
+    expect("a declared default is used as the value",
+           str_case is not None and "abc" in str_case["args"])
+    expect("optional flags come before the input",
+           all(c["args"] and c["args"][-1] == "input_in" for c in cases))
+    capped, _ = build_cases(bundle, inputs, max_cases=2)
+    expect("the cap limits the cases and keeps the base first",
+           [c["label"] for c in capped] == ["required only", "opt_flag"])
+    expect("a cap below one still keeps the base",
+           len(build_cases(bundle, inputs, max_cases=0)[0]) == 1)
+
+    expect("one diverging case makes the operation diverge",
+           aggregate([Outcome.MATCH, Outcome.DIVERGED]) == Outcome.DIVERGED)
+    expect("a match among agreed failures is a match",
+           aggregate([Outcome.AGREED_FAILURE, Outcome.MATCH]) == Outcome.MATCH)
+    expect("only agreed failures is an agreed failure",
+           aggregate([Outcome.AGREED_FAILURE, Outcome.AGREED_FAILURE])
+           == Outcome.AGREED_FAILURE)
+
+    failures.extend(_self_test_run_parity())
+    return failures
+
+
+def _self_test_run_parity():
+    """Drive run_parity itself over a fake registry, with both runtimes faked.
+
+    The checks above cover the pure pieces. This covers the loop that joins
+    them -- batching every case into one WASM call, pairing each with its native
+    run, and folding them into one record per operation -- which nothing else
+    executes: CI asks for --self-test, not a real catalogue run.
+    """
+    failures = []
+
+    def expect(label, condition):
+        if not condition:
+            failures.append(label)
+
+    input_type = next(iter(get_example_inputs()))
+    bundle = {
+        "id": "fake.op", "bin": "fake",
+        "runtime": {"modes": ["native", "wasm"]},
+        "parameters": [
+            {"name": "req", "flag": "-r", "type": "integer", "required": True},
+            {"name": "a", "flag": "-a", "type": "flag"},
+            {"name": "b", "flag": "-b", "type": "flag"},
+        ],
+        "io": {"inputs": [{"name": "in", "types": [input_type], "mode": "file"}],
+               "outputs": []},
+    }
+
+    def run_with(diverge_on):
+        batches = []
+
+        def fake_native(binary, args, files, stdin, collect, timeout):
+            return {"stdout": " ".join(args), "stderr": "", "code": 0,
+                    "files": {}, "error": None}
+
+        def fake_wasm(module_js, cases, timeout):
+            batches.append(len(cases))
+            return [{"stdout": " ".join(c["args"]) + (
+                        "!" if diverge_on and diverge_on in c["args"] else ""),
+                     "stderr": "", "code": 0, "files": {}, "error": None}
+                    for c in cases]
+
+        saved = (globals()["_run_native"], globals()["_run_wasm_batch"])
+        globals()["_run_native"], globals()["_run_wasm_batch"] = fake_native, fake_wasm
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                version = Path(tmp) / "fake.op" / "1.0"
+                (version / "runtime" / "native").mkdir(parents=True)
+                (version / "runtime" / "wasm").mkdir(parents=True)
+                (version / "runtime" / "native" / "fake").write_text("")
+                (version / "runtime" / "wasm" / "fake.js").write_text("")
+                (version / "bundle.json").write_text(json.dumps(bundle))
+                return run_parity(tmp, minimum=1, max_cases=8), batches
+        finally:
+            globals()["_run_native"], globals()["_run_wasm_batch"] = saved
+
+    agree, batches = run_with(None)
+    records = agree["records"]
+    expect("agreeing cases pass the report", agree["ok"])
+    expect("one record per operation, not per case", len(records) == 1)
+    expect("every case is run",
+           bool(records) and len(records[0].get("cases", [])) == 3)
+    expect("every case goes to WASM in one batch", batches == [3])
+
+    diverge, _ = run_with("-b")
+    record = diverge["records"][0] if diverge["records"] else {}
+    expect("a divergence in an optional case fails the report", not diverge["ok"])
+    expect("the operation is reported as diverged",
+           record.get("outcome") == Outcome.DIVERGED)
+    expect("the report names the case that diverged, not the base one",
+           "-b" in record.get("invocation", ""))
     return failures
