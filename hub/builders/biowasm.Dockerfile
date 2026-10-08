@@ -1,4 +1,13 @@
-FROM emscripten/emsdk:2.0.25
+ARG EMSCRIPTEN_IMAGE
+FROM ${EMSCRIPTEN_IMAGE}
+
+ARG EMSCRIPTEN_IMAGE
+ARG BIOWASM_REPOSITORY
+ARG BIOWASM_COMMIT
+
+LABEL dev.biochef.builder.base-image="${EMSCRIPTEN_IMAGE}" \
+      dev.biochef.builder.biowasm-repository="${BIOWASM_REPOSITORY}" \
+      dev.biochef.builder.biowasm-commit="${BIOWASM_COMMIT}"
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -19,14 +28,24 @@ RUN apt-get update \
         python3-pip \
         python3-venv \
         rsync \
-        sudo \
         texinfo \
         wget \
         libtool \
-        libtool-bin
+        libtool-bin \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /biowasm
 
-RUN git clone https://github.com/biowasm/biowasm.git . && chmod -R 777 /biowasm
+RUN git init . \
+    && git remote add origin "${BIOWASM_REPOSITORY}" \
+    && git fetch --depth 1 origin "${BIOWASM_COMMIT}" \
+    && git checkout --detach FETCH_HEAD \
+    && test "$(git rev-parse HEAD)" = "${BIOWASM_COMMIT}" \
+    && groupadd --gid 10001 biochef \
+    && useradd --uid 10001 --gid 10001 --create-home biochef \
+    && chown -R biochef:biochef /biowasm
 
-RUN git config --system --add safe.directory '*'
+COPY biowasm_runner.py /usr/local/bin/biochef-biowasm-build
+RUN chmod 0555 /usr/local/bin/biochef-biowasm-build
+
+USER 10001:10001

@@ -9,7 +9,7 @@ import random
 import string
 
 from utils.data_types import detect_data_type
-from utils.type_definitions import get_example_inputs
+from utils.type_definitions import get_example_inputs, is_binary_type
 
 seed = random.randint(0, 10_000)
 rnd = random.Random(seed)
@@ -42,17 +42,27 @@ def test_tools(registry_dir):
             with open(bundle_path) as f:
                 tool_bundle = json.load(f)
 
-            # Guarded so that one tool cannot end the run. Anything unexpected
-            # here previously escaped as a traceback and left every remaining
-            # recipe untested, which is the opposite of what this command is for.
-            try:
-                ok = test_tool_outputs(version_dir, tool_bundle)
-            except Exception as err:
-                print(f"[Error] Testing {tool_bundle.get('name')} raised {type(err).__name__}: {err}")
-                ok = False
+            bin_name = tool_bundle["bin"]
+            artifacts = {
+                "native": version_dir / "runtime" / "native" / bin_name,
+                "wasm": version_dir / "runtime" / "wasm" / f"{bin_name}.js",
+            }
+            runtimes = [runtime for runtime, artifact in artifacts.items()
+                        if runtime in tool_bundle.get("runtime", {}) or artifact.is_file()]
+            if not runtimes:
+                print(f"[SKIP] No native or wasm artifact found for: {bin_name}")
 
-            if not ok:
-                failed.append(tool_bundle["name"])
+            # Each runtime gets its own directory, and a failed run must not
+            # prevent the other runtime or subsequent tools from being tested.
+            for runtime in runtimes:
+                try:
+                    ok = test_tool_outputs(version_dir, tool_bundle, runtime)
+                except Exception as err:
+                    print(f"[Error] Testing {tool_bundle.get('name')} ({runtime}) raised {type(err).__name__}: {err}")
+                    ok = False
+
+                if not ok:
+                    failed.append(f"{tool_bundle['name']} ({runtime})")
 
     return failed
 
@@ -83,7 +93,7 @@ def run_wasm_tool(wasm_path, argv, tool_input, input_files, tmp_path):
     """
     spec = {
         "argv": argv,
-        "stdin": tool_input.strip() if tool_input else "",
+        "stdin": tool_input,
         "files": {
             name: base64.b64encode((tmp_path / name).read_bytes()).decode("ascii")
             for name in input_files
@@ -149,10 +159,10 @@ def run_wasm_tool(wasm_path, argv, tool_input, input_files, tmp_path):
 
     return run.get("stdout", ""), run.get("stderr", "")
 
-def test_tool_outputs(tool_dir, tool_bundle):
+def test_tool_outputs(tool_dir, tool_bundle, runtime):
     base_dir = os.getcwd()
 
-    print(f"[INFO] Testing tool '{tool_bundle['name']}'")
+    print(f"[INFO] Testing tool '{tool_bundle['name']}' ({runtime})")
 
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -170,30 +180,17 @@ def test_tool_outputs(tool_dir, tool_bundle):
             bin_path = tmp_path / "runtime" / "native" / bin_name
             wasm_path = tmp_path / "runtime" / "wasm" / f"{bin_name}.js"
 
-            # Most of the catalogue has no native build, and those recipes used
-            # to be skipped -- so a green run said only that the build had
-            # produced a file of the right name, and anything that linked but
-            # trapped at run time went unnoticed. Fall back to the wasm artifact,
-            # which every recipe has.
-            runtime = None
-            if bin_path.is_file():
-                runtime = "native"
-            elif wasm_path.is_file():
-                runtime = "wasm"
-            else:
-                print(f"[SKIP] No native or wasm artifact found for: {bin_name}")
-                return True
+            artifact = bin_path if runtime == "native" else wasm_path
+            if not artifact.is_file():
+                print(f"[Error] Missing {runtime} artifact for: {bin_name}")
+                return False
 
             tool_input = ""
             input_files = []
             expected_outputs = {}
-            # Arguments with no flag are held back and appended after every
-            # flagged one, which is what the frontend does. Emitting a bare
-            # filename first makes a getopt-style parser stop scanning, so the
-            # flags that follow are never seen: tn93 given "in.txt -o out.txt"
-            # prints its usage and exits 1, and given "-o out.txt in.txt" runs.
+            # Keep positional files after flags, as the frontend does.
             trailing = []
-            cmd = [str(bin_path)] if runtime == "native" else []
+            cmd = [bin_name] if runtime == "native" else []
 
             # Parameters
             for parameter in tool_bundle.get("parameters", []):
@@ -203,7 +200,7 @@ def test_tool_outputs(tool_dir, tool_bundle):
                 if parameter.get("flag"):
                     cmd.append(parameter["flag"])
 
-                if parameter.get("default"):
+                if parameter.get("default") is not None:
                     cmd.append(str(parameter["default"]))
                     continue
 
@@ -215,17 +212,18 @@ def test_tool_outputs(tool_dir, tool_bundle):
                 input_type = input_def["types"][0]
 
                 if input_type not in example_inputs:
+                    print(f"[WARNING] No example for input {input_def['name']} ({input_type})")
                     continue
 
                 if input_def["mode"] == "stdin":
-                    tool_input = example_inputs[input_type]
+                    tool_input = example_inputs[input_type].rstrip("\n") + "\n"
 
                 elif input_def["mode"] == "file":
                     file_name = f"input_{input_def['name']}.txt"
                     file_path = tmp_path / file_name
 
                     with open(file_path, "w") as f:
-                        f.write(example_inputs[input_type])
+                        f.write(example_inputs[input_type].rstrip("\n") + "\n")
 
                     input_files.append(file_name)
 
@@ -235,7 +233,6 @@ def test_tool_outputs(tool_dir, tool_bundle):
                     # A wasm tool sees its own virtual filesystem, where the
                     # host path means nothing.
                     argument = file_name if runtime == "wasm" else str(file_path)
-
                     if input_def.get("flag"):
                         cmd.append(argument)
                     else:
@@ -245,28 +242,19 @@ def test_tool_outputs(tool_dir, tool_bundle):
                     print(f"[TODO] Unsupported input mode: {input_def}")
                     return False
 
-            # Outputs. Nothing previously told a tool where to write, so any
-            # operation whose output is a file could only ever report that the
-            # file was missing -- 45 of the 186 declared outputs. The shape
-            # follows what the frontend does when it builds an invocation: a
-            # flag and a target, or a bare target when the flag is empty.
+            # Tell the tool where its declared file outputs should be written.
             for output_def in tool_bundle["io"]["outputs"]:
-                if output_def.get("mode") != "file":
+                if output_def["mode"] != "file":
                     continue
-
                 flag = output_def.get("flag")
                 if flag is None:
-                    # No way to say where it should go; the tool decides.
                     continue
-
                 target = output_def.get("filename") or f"{output_def['name']}.txt"
                 expected_outputs[output_def["name"]] = target
-
                 if flag == "":
                     trailing.append(target)
                 else:
-                    cmd.append(flag)
-                    cmd.append(target)
+                    cmd.extend([flag, target])
 
             cmd.extend(trailing)
 
@@ -281,7 +269,8 @@ def test_tool_outputs(tool_dir, tool_bundle):
                 try:
                     result = subprocess.run(
                         cmd,
-                        input=tool_input.strip().encode("ascii") if tool_input else None,
+                        executable=str(bin_path),
+                        input=tool_input.encode("utf-8"),
                         capture_output=True,
                         timeout=10,
                     )
@@ -291,6 +280,12 @@ def test_tool_outputs(tool_dir, tool_bundle):
 
                 stdout = result.stdout.decode("ascii", errors="replace")
                 stderr = result.stderr.decode("ascii", errors="replace")
+                if result.returncode < 0:
+                    print(f"[Error] Tool terminated by signal {-result.returncode}")
+                    print(safe(stderr)[:600])
+                    return False
+                if result.returncode:
+                    print(f"[WARNING] Tool exited with status {result.returncode}")
 
             all_ok = True
 
@@ -303,14 +298,9 @@ def test_tool_outputs(tool_dir, tool_bundle):
 
                 elif output_def["mode"] == "file":
                     matched = None
-
-                    # The name the tool was told to write, when it was told.
-                    asked_for = expected_outputs.get(output_name)
-                    if asked_for and (tmp_path / asked_for).is_file():
-                        matched = tmp_path / asked_for
-
-                    # Otherwise fall back to guessing, which is all that was
-                    # possible before the tool was given a target.
+                    declared_name = expected_outputs.get(output_name) or output_def.get("filename") or output_name
+                    if (tmp_path / declared_name).is_file():
+                        matched = tmp_path / declared_name
                     if not matched:
                         for f in tmp_path.iterdir():
                             if f.is_file() and f.stem.lower() == output_name.lower():
@@ -322,6 +312,9 @@ def test_tool_outputs(tool_dir, tool_bundle):
                         print(f"  Expected name: {output_name}")
                         continue
 
+                    if all(is_binary_type(t) for t in output_def["types"]):
+                        print(f"[INFO] Binary output found ({output_name}); format not checked")
+                        continue
                     content = matched.read_text()
 
                 else:
