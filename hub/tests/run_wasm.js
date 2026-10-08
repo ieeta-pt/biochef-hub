@@ -52,6 +52,16 @@ async function main() {
   try {
     Module = await factory({
       wasmBinary,
+      getPreloadedPackage: (name, size) => {
+        const root = path.dirname(resolved);
+        const file = path.resolve(root, name);
+        if (path.dirname(file) !== root || fs.lstatSync(file).isSymbolicLink()) {
+          throw new Error("unsafe preloaded package path");
+        }
+        const data = fs.readFileSync(file);
+        if (data.length !== size) throw new Error("preloaded package size mismatch");
+        return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+      },
     // The recipes are built with INVOKE_RUN=0, so main is called explicitly
     // below once the input files are in place.
     noInitialRun: true,
