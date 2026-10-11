@@ -315,7 +315,16 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
                     if all(is_binary_type(t) for t in output_def["types"]):
                         print(f"[INFO] Binary output found ({output_name}); format not checked")
                         continue
-                    content = matched.read_text()
+                    try:
+                        content = matched.read_text()
+                    except UnicodeDecodeError:
+                        # A declaration can allow both text and binary formats,
+                        if any(is_binary_type(t) for t in output_def["types"]):
+                            print(f"[INFO] Binary output found ({output_name}); format not checked")
+                            continue
+                        print(f"[ERROR] Output is not UTF-8 text ({output_name})")
+                        all_ok = False
+                        continue
 
                 else:
                     print(f"[TODO] Unsupported output mode: {output_def}")
