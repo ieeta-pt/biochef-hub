@@ -220,6 +220,70 @@ def validate_fai(content):
 
     return True
 
+def validate_newick(content):
+    """Check ordinary Newick syntax, including multiple trees and comments."""
+
+    if not isinstance(content, str):
+        return False
+    if content.startswith("\ufeff"):
+        content = content[1:]
+    if not content.strip(" \t\r\n"):
+        return False
+
+    tokens = re.compile(r"[ \t\r\n]+|'(?:[^'\r\n]|'')*'|[(),:;]|[^ \t\r\n(),:;\[\]']+")
+    number = re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
+    pos = depth = trees = 0
+    state, seen_node = "node", False
+    while pos < len(content):
+        if content[pos] == "[":
+            comments = 1
+            pos += 1
+            while pos < len(content) and comments:
+                comments += (content[pos] == "[") - (content[pos] == "]")
+                pos += 1
+            if comments:
+                return False
+            continue
+        match = tokens.match(content, pos)
+        if not match:
+            return False
+        token, pos = match.group(), match.end()
+        if token[0] in " \t\r\n":
+            continue
+        if token == "(":
+            if state != "node":
+                return False
+            depth += 1
+            seen_node = True
+        elif token == ")":
+            if not depth or state == "length":
+                return False
+            depth -= 1
+            state = "label"
+        elif token == ",":
+            if not depth or state == "length":
+                return False
+            state = "node"
+        elif token == ":":
+            if state not in ("node", "label", "suffix"):
+                return False
+            state = "length"
+            seen_node = True
+        elif token == ";":
+            if depth or state == "length":
+                return False
+            trees += 1
+            state, seen_node = "node", False
+        elif state == "length":
+            if not number.fullmatch(token):
+                return False
+            state = "end"
+        elif state in ("node", "label") and token.replace("\t", "").isprintable():
+            state, seen_node = "suffix", True
+        else:
+            return False
+    return trees > 0 and depth == 0 and not seen_node
+
 ALL_TYPES = [
     {'type': 'FASTA', 'validator': validate_fasta},
     {'type': 'Multi-FASTA', 'validator': validate_multi_fasta},
@@ -238,6 +302,7 @@ ALL_TYPES = [
     {'type': 'GFF', 'validator': validate_gff},
     {'type': 'JSON', 'validator': validate_json},
     {'type': 'FAI', 'validator': validate_fai},
+    {'type': 'NEWICK', 'validator': validate_newick},
     {'type': 'TEXT', 'validator': lambda x: True},  # Default fallback
 ]
 
