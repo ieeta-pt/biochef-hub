@@ -187,6 +187,9 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
 
             tool_input = ""
             input_files = []
+            expected_outputs = {}
+            # Keep positional files after flags, as the frontend does.
+            trailing = []
             cmd = [bin_name] if runtime == "native" else []
 
             # Parameters
@@ -229,7 +232,11 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
 
                     # A wasm tool sees its own virtual filesystem, where the
                     # host path means nothing.
-                    cmd.append(file_name if runtime == "wasm" else str(file_path))
+                    argument = file_name if runtime == "wasm" else str(file_path)
+                    if input_def.get("flag"):
+                        cmd.append(argument)
+                    else:
+                        trailing.append(argument)
 
                 else:
                     print(f"[TODO] Unsupported input mode: {input_def}")
@@ -237,9 +244,19 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
 
             # Tell the tool where its declared file outputs should be written.
             for output_def in tool_bundle["io"]["outputs"]:
-                if output_def["mode"] == "file" and output_def.get("flag"):
-                    name = output_def.get("filename") or output_def["name"]
-                    cmd.extend([output_def["flag"], name])
+                if output_def["mode"] != "file":
+                    continue
+                flag = output_def.get("flag")
+                if flag is None:
+                    continue
+                target = output_def.get("filename") or f"{output_def['name']}.txt"
+                expected_outputs[output_def["name"]] = target
+                if flag == "":
+                    trailing.append(target)
+                else:
+                    cmd.extend([flag, target])
+
+            cmd.extend(trailing)
 
             # Run tool
             print(f"Testing tool {tool_bundle['name']} ({runtime}) with command {cmd}")
@@ -281,11 +298,14 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
 
                 elif output_def["mode"] == "file":
                     matched = None
-                    declared_name = output_def.get("filename") or output_name
-                    for f in tmp_path.iterdir():
-                        if f.is_file() and (f.name == declared_name or f.stem.lower() == output_name.lower()):
-                            matched = f
-                            break
+                    declared_name = expected_outputs.get(output_name) or output_def.get("filename") or output_name
+                    if (tmp_path / declared_name).is_file():
+                        matched = tmp_path / declared_name
+                    if not matched:
+                        for f in tmp_path.iterdir():
+                            if f.is_file() and f.stem.lower() == output_name.lower():
+                                matched = f
+                                break
 
                     if not matched:
                         print("[WARNING] Output file not found")
@@ -295,7 +315,16 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
                     if all(is_binary_type(t) for t in output_def["types"]):
                         print(f"[INFO] Binary output found ({output_name}); format not checked")
                         continue
-                    content = matched.read_text()
+                    try:
+                        content = matched.read_text()
+                    except UnicodeDecodeError:
+                        # A declaration can allow both text and binary formats,
+                        if any(is_binary_type(t) for t in output_def["types"]):
+                            print(f"[INFO] Binary output found ({output_name}); format not checked")
+                            continue
+                        print(f"[ERROR] Output is not UTF-8 text ({output_name})")
+                        all_ok = False
+                        continue
 
                 else:
                     print(f"[TODO] Unsupported output mode: {output_def}")
