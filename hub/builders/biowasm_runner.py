@@ -14,6 +14,43 @@ COMMIT = re.compile(r"^[0-9a-f]{40}$")
 MAX_EVIDENCE_BYTES = 1024 * 1024
 
 
+def node_compile_driver():
+    # Use temporary drivers so BioWASM's git stash cannot discard Node support.
+    runtime_dir = EVIDENCE_DIR / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=False)
+    shared = BIOWASM_ROOT / "bin/shared.sh"
+    if shared.read_text().count('-s ENVIRONMENT="web,worker"') != 1:
+        raise RuntimeError("Unexpected BioWASM runtime flags")
+
+    replacements = {
+        "compile.sh": [
+            (". bin/shared.sh\n", '. bin/shared.sh\nexport EM_FLAGS="${EM_FLAGS/web,worker/web,worker,node}"\n'),
+        ],
+        "compile.py": [
+            ('DIR_ROOT = Path(__file__).parent / "../"', f"DIR_ROOT = Path({str(BIOWASM_ROOT)!r})"),
+            ("bin/compile.sh tools/{tool} {branch}", f"{runtime_dir}/compile.sh tools/{{tool}} {{branch}}"),
+        ],
+    }
+    scripts = []
+    for name, edits in replacements.items():
+        source = BIOWASM_ROOT / "bin" / name
+        text = source.read_text()
+        for original, replacement in edits:
+            if text.count(original) != 1:
+                raise RuntimeError(f"Unexpected BioWASM driver: {name}")
+            text = text.replace(original, replacement)
+        target = runtime_dir / name
+        target.write_text(text)
+        target.chmod(0o700)
+        scripts.append({"path": f"bin/{name}", "source_digest": file_digest(source),
+                        "adapted_digest": file_digest(target)})
+    return runtime_dir / "compile.py", {
+        "environment": ["web", "worker", "node"],
+        "shared_flags_digest": file_digest(shared),
+        "scripts": scripts,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--tool", required=True)
@@ -23,9 +60,10 @@ def main():
     args = parser.parse_args()
 
     os.chdir(BIOWASM_ROOT)
+    driver, runtime_override = node_compile_driver()
     command = [
         "python3",
-        "./bin/compile.py",
+        str(driver),
         "--tools",
         args.tool,
         "--versions",
@@ -37,6 +75,7 @@ def main():
     framework = git_identity(BIOWASM_ROOT)
     source = source_identity(source_root, include_files=True)
     configuration, dependencies = configuration_evidence(args.tool, args.version)
+    configuration["runtime_override"] = runtime_override
 
     observations = {
         "compile_exit_code": result.returncode,
