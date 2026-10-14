@@ -136,7 +136,11 @@ def build_plugins(file_paths, build_dir, registry_dir):
 
                 if runtime == "wasm":
                     wasm_outputs = []
-                    for extension in ("js", "wasm"):
+                    extensions = ["js", "wasm"]
+                    data_artifact = output_path / f"{bin_name}.data"
+                    if data_artifact.exists() or data_artifact.is_symlink():
+                        extensions.append("data")
+                    for extension in extensions:
                         source_artifact = output_path / f"{bin_name}.{extension}"
                         if not source_artifact.is_file() or source_artifact.is_symlink():
                             raise RuntimeError(f"WASM build output is missing or unsafe: {source_artifact}")
