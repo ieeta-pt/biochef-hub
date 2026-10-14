@@ -224,14 +224,21 @@ def validate_gfa(content):
     if not content:
         return False
     lines = content.strip().split('\n')
+    has_segment = False
     for line in lines:
         if not line.strip():
             continue
-        # GFA record types: H (header), S (segment), L (link), C (containment),
-        # P (path), W (walk), J (jump), # (comment)
-        if line[0] not in 'HSLCPWJ#':
+        fields = line.split('\t')
+        # Every record starts with a one-letter type. GFA1 uses H/S/L/C/P/W/J,
+        # GFA2 adds E/F/G/O/U, and the spec tells readers to skip types they do
+        # not know, which tools rely on: miniasm writes 'a' and 'x' records.
+        if line[0] != '#' and (len(fields[0]) != 1 or not fields[0].isalpha()):
             return False
-    return True
+        if fields[0] == 'S':
+            if len(fields) < 3:
+                return False
+            has_segment = True
+    return has_segment
 
 def validate_list(content):
     if not content.strip(): 
