@@ -140,6 +140,18 @@ TYPE_DEFINITIONS = [
         "kind": "binary"
     },
     {
+        "id": "BIGBED",
+        "input": True,
+        "output": True,
+        "kind": "binary"
+    },
+    {
+        "id": "BIGWIG",
+        "input": True,
+        "output": True,
+        "kind": "binary"
+    },
+    {
         "id": "BED",
         "input": True,
         "output": True,
