@@ -140,6 +140,18 @@ TYPE_DEFINITIONS = [
         "kind": "binary"
     },
     {
+        "id": "BIGBED",
+        "input": True,
+        "output": True,
+        "kind": "binary"
+    },
+    {
+        "id": "BIGWIG",
+        "input": True,
+        "output": True,
+        "kind": "binary"
+    },
+    {
         "id": "BED",
         "input": True,
         "output": True,
@@ -156,18 +168,6 @@ TYPE_DEFINITIONS = [
         "input": True,
         "output": True,
         "example": "seq\nseq1\nseq2",
-    },
-    {
-        "id": "BIGBED",
-        "input": True,
-        "output": True,
-        "kind": "binary"
-    },
-    {
-        "id": "BIGWIG",
-        "input": True,
-        "output": True,
-        "kind": "binary"
     },
 ]
 
