@@ -176,6 +176,12 @@ TYPE_DEFINITIONS = [
         "kind": "binary"
     },
     {
+        "id": "FMD",
+        "input": True,
+        "output": True,
+        "kind": "binary"
+    },
+    {
         "id": "BED",
         "input": True,
         "output": True,
