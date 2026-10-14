@@ -32,6 +32,7 @@ RUN apt-get update \
         wget \
         libtool \
         libtool-bin \
+        libpng-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /biowasm
