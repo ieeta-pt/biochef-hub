@@ -39,7 +39,17 @@ TYPE_DEFINITIONS = [
         "id": "Multi-FASTA",
         "input": True,
         "output": True,
-        "example": ">seq1_human\nGTTCCAGTAGCGGCGTATCGTAGGTGACGTAGCAGTCGATCGCTAGCGAAGCGCTGACTAGCTCGATAGCGGCTACTCGTACGTAGTACGTAGCATACG\n>seq2_cat\nAGCTGCTGATCGTGATCGAGCTCGATGCATCGATCGCTAGCGTACGTAGCTGACGTAGCGTGACTGATCGTAGCTGATCGTGACGTAGCTGACGTAGCTG",
+        # Four aligned taxa with informative shared substitutions for tree tools.
+        "example": (
+            '>seq1_human\n'
+            'TTGATCCTTAATTGCGGCTTCGATTACTAAAAAACAGGGACAGCATCAACCAAACTGCTTACATTACTGTCGGCGCAACAGCGCGGAAACCGGTTGTTAA\n'
+            '>seq2_cat\n'
+            'TTGACCCTTAACTGCGGCTTCAATTACTAATAAACAGGGAAAGCATTACCCAAACTGCTTACATTACTGTCGGCGCAACAGCGCCGCAACCGATTGTTAA\n'
+            '>seq3_mouse\n'
+            'CTGACGTTTAAATGCGGCTGGAATTATTCAAAAACTGGTGAAGCATTTCCCAAGTTGCTTCCATTACAGTCTGCGGAACAGCGTCGAGAGCGATCGTAAA\n'
+            '>seq4_dog\n'
+            'CTGACGTCGAAATGCGGCTAGTATGATTAAAGAACTGGTAAAGCATTACCCAAATTGCTTCCATTACAGTCTGCGGAACAGCGTCGAAATCGATCGTAAA'
+        ),
     },
     {
         "id": "EFA",
@@ -92,6 +102,14 @@ TYPE_DEFINITIONS = [
         "id": "VCF",
         "input": True,
         "output": True,
+        "example": (
+            "##fileformat=VCFv4.2\n"
+            "##contig=<ID=seq,length=98>\n"
+            "##FILTER=<ID=PASS,Description=\"All filters passed\">\n"
+            "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n"
+            "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tsample\n"
+            "seq\t10\t.\tC\tA\t60\tPASS\t.\tGT\t0/1"
+        ),
     },
     {
         "id": "BCF",
@@ -103,6 +121,12 @@ TYPE_DEFINITIONS = [
         "id": "SAM",
         "input": True,
         "output": True,
+        "example": (
+            "@HD\tVN:1.6\tSO:queryname\n"
+            "@SQ\tSN:seq\tLN:98\n"
+            "read1\t99\tseq\t1\t60\t40M\t=\t59\t98\tTTGCACTGACCTGAAGTCTTGGAGTATGACCGCGGCTCGG\tIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII\n"
+            "read1\t147\tseq\t59\t60\t40M\t=\t1\t-98\tCTAGCGCTATAGGTGGTGCCGAAGGCGGTCTGTCGTCGTA\tIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII"
+        ),
     },
     {
         "id": "BAI",
