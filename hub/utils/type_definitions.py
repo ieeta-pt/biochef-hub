@@ -223,6 +223,16 @@ TYPE_DEFINITIONS = [
         "output": True,
         "example": "seq\nseq1\nseq2",
     },
+    {
+        "id": "NEWICK",
+        "input": True,
+        "output": True,
+        "example": (
+            "((A:0.1,B:0.1)100:0.2,(C:0.1,D:0.1)100:0.2);\n"
+            "((A:0.2,B:0.2)95:0.3,(C:0.2,D:0.2)95:0.3);\n"
+            "((A:0.3,C:0.3)90:0.4,(B:0.3,D:0.3)90:0.4);"
+        ),
+    },
 ]
 
 
