@@ -178,6 +178,68 @@ def validate_gff(content):
 
     return True
 
+def validate_gtf(content):
+    if not content:
+        return False
+    lines = content.strip().split('\n')
+    for line in lines:
+        if line.startswith('#') or not line.strip():
+            continue
+        fields = line.split('\t')
+        if len(fields) != 9:
+            return False
+        seqid, source, type_, start, end, score, strand, frame, attributes = fields
+        if not start.isdigit() or not end.isdigit():
+            return False
+        if strand not in ['+', '-', '.']:
+            return False
+        if frame not in ['0', '1', '2', '.']:
+            return False
+        # GTF attribute column uses key "value"; quoted-value pairs separated by ';'
+        if 'gene_id' not in attributes and 'transcript_id' not in attributes:
+            return False
+    return True
+
+def validate_paf(content):
+    if not content:
+        return False
+    lines = content.strip().split('\n')
+    for line in lines:
+        if not line.strip():
+            continue
+        fields = line.split('\t')
+        # PAF requires at least 12 mandatory columns
+        if len(fields) < 12:
+            return False
+        # Numeric fields: query_len, query_start, query_end, target_len,
+        # target_start, target_end, matching_bases, alignment_block_len, mapq
+        for idx in (1, 2, 3, 6, 7, 8, 9, 10, 11):
+            if not fields[idx].lstrip('-').isdigit():
+                return False
+        if fields[4] not in ('+', '-'):
+            return False
+    return True
+
+def validate_gfa(content):
+    if not content:
+        return False
+    lines = content.strip().split('\n')
+    has_segment = False
+    for line in lines:
+        if not line.strip():
+            continue
+        fields = line.split('\t')
+        # Every record starts with a one-letter type. GFA1 uses H/S/L/C/P/W/J,
+        # GFA2 adds E/F/G/O/U, and the spec tells readers to skip types they do
+        # not know, which tools rely on: miniasm writes 'a' and 'x' records.
+        if line[0] != '#' and (len(fields[0]) != 1 or not fields[0].isalpha()):
+            return False
+        if fields[0] == 'S':
+            if len(fields) < 3:
+                return False
+            has_segment = True
+    return has_segment
+
 def validate_list(content):
     if not content.strip(): 
         return False 
@@ -283,6 +345,9 @@ ALL_TYPES = [
     {'type': 'BED', 'validator': validate_bed},
     {'type': 'LIST', 'validator': validate_list},
     {'type': 'GFF', 'validator': validate_gff},
+    {'type': 'GTF', 'validator': validate_gtf},
+    {'type': 'PAF', 'validator': validate_paf},
+    {'type': 'GFA', 'validator': validate_gfa},
     {'type': 'JSON', 'validator': validate_json},
     {'type': 'CLUSTAL', 'validator': validate_clustal},
     {'type': 'SND', 'validator': validate_snd},
