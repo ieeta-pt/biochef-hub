@@ -158,6 +158,18 @@ TYPE_DEFINITIONS = [
         "example": "seq\t0\t10\nseq1\t0\t20",
     },
     {
+        "id": "CLUSTAL",
+        "input": True,
+        "output": True,
+        "example": "CLUSTAL format alignment by MAFFT (v7.526)\n\n\nseq1            ACGTACGTAC-GTACGT\nseq2            ACGTACGAACTGTACGT\nseq3            ACGTACGTAC-GTACGA\n                ******* ** ***** \n",
+    },
+    {
+        "id": "SND",
+        "input": True,
+        "output": True,
+        "example": "#sample\tgene1\tgene2\tgene3\ncellA\t0.95\t0\t1.2\ncellB\t0\t0.31\t0.8\ncellC\t1.1\t0.07\t0",
+    },
+    {
         "id": "GFF",
         "input": True,
         "output": True,

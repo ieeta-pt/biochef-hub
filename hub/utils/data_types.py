@@ -190,6 +190,53 @@ def validate_list(content):
             return False
     return True
 
+def validate_clustal(content):
+    if not content or not content.strip():
+        return False
+    lines = content.strip().split('\n')
+    # Clustal, MAFFT --clustalout and MAFFT f2cl all open with a CLUSTAL banner
+    if not lines[0].startswith('CLUSTAL'):
+        return False
+    has_sequence = False
+    for line in lines[1:]:
+        if not line.strip():
+            continue
+        if line[0].isspace():
+            # conservation line under each block: '*', ':', '.' and spaces
+            if line.strip(' *:.'):
+                return False
+            continue
+        fields = line.split()
+        if len(fields) not in (2, 3):
+            return False
+        if not re.fullmatch(r'[A-Za-z*.\-]+', fields[1]):
+            return False
+        if len(fields) == 3 and not fields[2].isdigit():
+            return False
+        has_sequence = True
+    return has_sequence
+
+def validate_snd(content):
+    # bhtsne's SND table: optional '#' header, then one row per sample,
+    # a name followed by tab-separated numbers, every row the same width
+    if not content or not content.strip():
+        return False
+    width = None
+    for line in content.strip().split('\n'):
+        if not line.strip() or line.startswith('#'):
+            continue
+        fields = line.rstrip('\r').split('\t')
+        if len(fields) < 2:
+            return False
+        if width is None:
+            width = len(fields)
+        elif len(fields) != width:
+            return False
+        for value in fields[1:]:
+            if not re.fullmatch(r'[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?', value):
+                return False
+    return width is not None
+
 def validate_json(content):
     if not content or not content.strip():
         return False
@@ -237,6 +284,8 @@ ALL_TYPES = [
     {'type': 'LIST', 'validator': validate_list},
     {'type': 'GFF', 'validator': validate_gff},
     {'type': 'JSON', 'validator': validate_json},
+    {'type': 'CLUSTAL', 'validator': validate_clustal},
+    {'type': 'SND', 'validator': validate_snd},
     {'type': 'FAI', 'validator': validate_fai},
     {'type': 'TEXT', 'validator': lambda x: True},  # Default fallback
 ]
