@@ -205,6 +205,27 @@ TYPE_DEFINITIONS = [
         "example_file": "example.yak",
     },
     {
+        "id": "KRAKEN2_HASH",
+        "input": True,
+        "output": True,
+        "kind": "binary",
+        "example_file": "example.hash.k2d",
+    },
+    {
+        "id": "KRAKEN2_OPTIONS",
+        "input": True,
+        "output": True,
+        "kind": "binary",
+        "example_file": "example.opts.k2d",
+    },
+    {
+        "id": "KRAKEN2_TAXONOMY",
+        "input": True,
+        "output": True,
+        "kind": "binary",
+        "example_file": "example.taxo.k2d",
+    },
+    {
         "id": "BED",
         "input": True,
         "output": True,
