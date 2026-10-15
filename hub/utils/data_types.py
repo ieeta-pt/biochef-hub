@@ -101,10 +101,12 @@ def validate_vcf(content):
         if not re.fullmatch(r'[ACGTN]+', ref, re.I):
             return False
 
-        if not all(re.fullmatch(r'[ACGTN,]+', a, re.I) for a in alt.split(',')):
+        # Besides bases, VCF allows no ALT (.), a deletion placeholder (*),
+        # symbolic alleles such as <*> or <DEL>, and breakends such as G]2:42].
+        if not all(re.fullmatch(r'[ACGTN]+|[.*]|<[^<>]+>|[ACGTN.]*[\[\]].*', a, re.I) for a in alt.split(',')):
             return False
 
-        if qual != '.' and not re.fullmatch(r'\d+(\.\d+)?', qual):
+        if qual != '.' and not re.fullmatch(r'\d+(\.\d+)?([eE][-+]?\d+)?', qual):
             return False
 
     return header_found

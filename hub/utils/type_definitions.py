@@ -1,3 +1,9 @@
+from pathlib import Path
+
+# Binary examples cannot live in this file, so they are files in examples/,
+# made from the text examples by examples/make-examples.sh.
+EXAMPLES_DIR = Path(__file__).resolve().parent / "examples"
+
 TYPE_DEFINITIONS = [
     {
         "id": "JSON",
@@ -115,7 +121,8 @@ TYPE_DEFINITIONS = [
         "id": "BCF",
         "input": True,
         "output": True,
-        "kind": "binary"
+        "kind": "binary",
+        "example_file": "example.bcf",
     },
     {
         "id": "SAM",
@@ -132,54 +139,70 @@ TYPE_DEFINITIONS = [
         "id": "BAI",
         "input": True,
         "output": True,
-        "kind": "binary"
+        "kind": "binary",
+        "example_file": "example.bam.bai",
     },
     {
         "id": "MMI",
         "input": True,
         "output": True,
-        "kind": "binary"
+        "kind": "binary",
+        "example_file": "example.mmi",
     },
     {
         "id": "CSI",
         "input": True,
         "output": True,
-        "kind": "binary"
+        "kind": "binary",
+        "example_file": "example.bcf.csi",
     },
     {
         "id": "FAI",
         "input": True,
         "output": True,
+        "example": "seq\t98\t5\t98\t99",
     },
     {
         "id": "BAM",
         "input": True,
         "output": True,
-        "kind": "binary"
+        "kind": "binary",
+        "example_file": "example.bam",
     },
     {
         "id": "CRAM",
         "input": True,
         "output": True,
-        "kind": "binary"
+        "kind": "binary",
+        "example_file": "example.cram",
     },
     {
         "id": "BIGBED",
         "input": True,
         "output": True,
-        "kind": "binary"
+        "kind": "binary",
+        "example_file": "example.bb",
     },
     {
         "id": "BIGWIG",
         "input": True,
         "output": True,
-        "kind": "binary"
+        "kind": "binary",
+        "example_file": "example.bw",
     },
     {
         "id": "FMD",
         "input": True,
         "output": True,
-        "kind": "binary"
+        "kind": "binary",
+        "example_file": "example.fmd",
+    },
+    {
+        "id": "YAK",
+        "input": True,
+        "output": True,
+        "kind": "binary",
+        "example_file": "example.yak",
     },
     {
         "id": "BED",
@@ -255,11 +278,14 @@ def get_allowed_output_types():
 
 
 def get_example_inputs():
-    return {
-        type_def["id"]: type_def["example"]
-        for type_def in TYPE_DEFINITIONS
-        if "example" in type_def
-    }
+    """Maps each type with an example to it: str for text types, bytes for binary ones."""
+    examples = {}
+    for type_def in TYPE_DEFINITIONS:
+        if "example" in type_def:
+            examples[type_def["id"]] = type_def["example"]
+        elif "example_file" in type_def:
+            examples[type_def["id"]] = (EXAMPLES_DIR / type_def["example_file"]).read_bytes()
+    return examples
 
 
 def is_binary_type(type_id):
@@ -283,6 +309,12 @@ def validate_type_examples():
 
     for type_def in TYPE_DEFINITIONS:
         type_id = type_def["id"]
+
+        if "example_file" in type_def:
+            path = EXAMPLES_DIR / type_def["example_file"]
+            if not path.is_file() or path.stat().st_size == 0:
+                failures.append(f"{type_id}: example file {path.name} is missing or empty")
+            continue
 
         if "example" not in type_def:
             continue

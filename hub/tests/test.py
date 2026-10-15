@@ -215,15 +215,25 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
                     print(f"[WARNING] No example for input {input_def['name']} ({input_type})")
                     continue
 
+                example = example_inputs[input_type]
+
                 if input_def["mode"] == "stdin":
-                    tool_input = example_inputs[input_type].rstrip("\n") + "\n"
+                    # The harnesses pass stdin as text, which cannot carry
+                    # a binary example.
+                    if isinstance(example, bytes):
+                        print(f"[WARNING] No text example for stdin input {input_def['name']} ({input_type})")
+                        continue
+                    tool_input = example.rstrip("\n") + "\n"
 
                 elif input_def["mode"] == "file":
                     file_name = f"input_{input_def['name']}.txt"
                     file_path = tmp_path / file_name
 
-                    with open(file_path, "w") as f:
-                        f.write(example_inputs[input_type].rstrip("\n") + "\n")
+                    if isinstance(example, bytes):
+                        file_path.write_bytes(example)
+                    else:
+                        with open(file_path, "w") as f:
+                            f.write(example.rstrip("\n") + "\n")
 
                     input_files.append(file_name)
 
