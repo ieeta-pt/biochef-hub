@@ -16,7 +16,8 @@ import importlib.util, sys
 spec = importlib.util.spec_from_file_location("td", sys.argv[1])
 td = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(td)
-examples = td.get_example_inputs()
+# Only the text examples: the binary ones are what this script makes
+examples = {t["id"]: t["example"] for t in td.TYPE_DEFINITIONS if "example" in t}
 for type_id, name in [("FASTA", "ref.fa"), ("SAM", "reads.sam"), ("VCF", "calls.vcf")]:
     with open(f"{sys.argv[2]}/{name}", "w") as f:
         f.write(examples[type_id].rstrip("\n") + "\n")
