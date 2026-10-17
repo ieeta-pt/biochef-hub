@@ -198,6 +198,24 @@ TYPE_DEFINITIONS = [
         "example_file": "example.fmd",
     },
     {
+        # A bwa index: a tar of ref.amb, ref.ann, ref.bwt, ref.pac and
+        # ref.sa, the files bwa index writes for a prefix, and ref.alt when
+        # some sequences are alternate contigs.
+        "id": "BWA_INDEX",
+        "input": True,
+        "output": True,
+        "kind": "binary",
+        "example_file": "example.bwa",
+    },
+    {
+        # bwa aln's alignments, which bwa samse and sampe turn into SAM.
+        "id": "SAI",
+        "input": True,
+        "output": True,
+        "kind": "binary",
+        "example_file": "example.sai",
+    },
+    {
         "id": "BED",
         "input": True,
         "output": True,

@@ -3,7 +3,7 @@
 # type_definitions.py, so every binary example describes the same data:
 # the 98 bp sequence "seq", its two paired reads and its one variant.
 #
-# Needs samtools, bcftools, minimap2, ropebwt3, bedToBigBed and
+# Needs samtools, bcftools, minimap2, ropebwt3, bwa, bedToBigBed and
 # bedGraphToBigWig on PATH. Run from anywhere; writes next to this script.
 set -euo pipefail
 
@@ -18,7 +18,7 @@ td = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(td)
 # Only the text examples: the binary ones are what this script makes
 examples = {t["id"]: t["example"] for t in td.TYPE_DEFINITIONS if "example" in t}
-for type_id, name in [("FASTA", "ref.fa"), ("SAM", "reads.sam"), ("VCF", "calls.vcf")]:
+for type_id, name in [("FASTA", "ref.fa"), ("FASTQ", "reads.fq"), ("SAM", "reads.sam"), ("VCF", "calls.vcf")]:
     with open(f"{sys.argv[2]}/{name}", "w") as f:
         f.write(examples[type_id].rstrip("\n") + "\n")
 PY
@@ -35,6 +35,19 @@ bcftools view --no-version -Ob -o calls.bcf calls.vcf
 bcftools index -c -o calls.bcf.csi calls.bcf
 minimap2 -d ref.mmi ref.fa
 ropebwt3 build -d -o ref.fmd ref.fa
+bwa index -p ref ref.fa
+bwa aln ref reads.fq > reads.sai
+# The index files in one tar, owned by nobody and dated 0, as BioChef's
+# bwa operations write it
+python3 - <<'PY'
+import tarfile
+with tarfile.open("ref.bwa", "w", format=tarfile.USTAR_FORMAT) as tar:
+    for ext in ["amb", "ann", "bwt", "pac", "sa"]:
+        info = tar.gettarinfo(f"ref.{ext}")
+        info.mode, info.uid, info.gid, info.uname, info.gname, info.mtime = 0o644, 0, 0, "", "", 0
+        with open(f"ref.{ext}", "rb") as f:
+            tar.addfile(info, f)
+PY
 bedToBigBed peaks.bed sizes peaks.bb
 bedGraphToBigWig cov.bedgraph sizes cov.bw
 
@@ -45,5 +58,7 @@ cp calls.bcf "$out/example.bcf"
 cp calls.bcf.csi "$out/example.bcf.csi"
 cp ref.mmi "$out/example.mmi"
 cp ref.fmd "$out/example.fmd"
+cp ref.bwa "$out/example.bwa"
+cp reads.sai "$out/example.sai"
 cp peaks.bb "$out/example.bb"
 cp cov.bw "$out/example.bw"
