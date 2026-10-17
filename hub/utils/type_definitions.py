@@ -255,6 +255,53 @@ TYPE_DEFINITIONS = [
             "((A:0.3,C:0.3)90:0.4,(B:0.3,D:0.3)90:0.4);"
         ),
     },
+    {
+        # A HISAT2 index: a tar of ref.1.ht2 to ref.8.ht2, the files
+        # hisat2-build writes for a prefix.
+        "id": "HISAT2_INDEX",
+        "input": True,
+        "output": True,
+        "kind": "binary",
+        "example_file": "example.ht2",
+    },
+    {
+        # HISAT2's splice sites, as hisat2_extract_splice_sites.py writes
+        # them from a GTF and hisat2 reports them: per line the sequence,
+        # the last base of the exon before the intron and the first base of
+        # the exon after it (0-based), and the strand.
+        "id": "HISAT2_SS",
+        "input": True,
+        "output": True,
+        "example": "seq\t29\t60\t+",
+    },
+    {
+        # HISAT2's exons, as hisat2_extract_exons.py writes them from a GTF:
+        # per line the sequence, the first and last base (0-based), and the
+        # strand.
+        "id": "HISAT2_EXON",
+        "input": True,
+        "output": True,
+        "example": "seq\t10\t29\t+\nseq\t60\t89\t+",
+    },
+    {
+        # HISAT2's SNPs, as hisat2_extract_snps_haplotypes_VCF.py writes
+        # them: per line an ID, single, deletion or insertion, the sequence,
+        # the position (0-based), and the other base, the length deleted or
+        # the bases inserted.
+        "id": "HISAT2_SNP",
+        "input": True,
+        "output": True,
+        "example": "rs1\tsingle\tseq\t45\tA",
+    },
+    {
+        # HISAT2's haplotypes, which group the SNPs seen together: per line
+        # an ID, the sequence, the first and last base (0-based), and the
+        # IDs of its SNPs, separated by commas.
+        "id": "HISAT2_HAPLOTYPE",
+        "input": True,
+        "output": False,
+        "example": "ht1\tseq\t45\t45\trs1",
+    },
 ]
 
 

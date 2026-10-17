@@ -3,7 +3,7 @@
 # type_definitions.py, so every binary example describes the same data:
 # the 98 bp sequence "seq", its two paired reads and its one variant.
 #
-# Needs samtools, bcftools, minimap2, ropebwt3, bedToBigBed and
+# Needs samtools, bcftools, minimap2, ropebwt3, hisat2-build, bedToBigBed and
 # bedGraphToBigWig on PATH. Run from anywhere; writes next to this script.
 set -euo pipefail
 
@@ -18,7 +18,8 @@ td = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(td)
 # Only the text examples: the binary ones are what this script makes
 examples = {t["id"]: t["example"] for t in td.TYPE_DEFINITIONS if "example" in t}
-for type_id, name in [("FASTA", "ref.fa"), ("SAM", "reads.sam"), ("VCF", "calls.vcf")]:
+for type_id, name in [("FASTA", "ref.fa"), ("SAM", "reads.sam"), ("VCF", "calls.vcf"), ("HISAT2_SS", "ref.ss"),
+                      ("HISAT2_EXON", "ref.exon"), ("HISAT2_SNP", "ref.snp"), ("HISAT2_HAPLOTYPE", "ref.haplotype")]:
     with open(f"{sys.argv[2]}/{name}", "w") as f:
         f.write(examples[type_id].rstrip("\n") + "\n")
 PY
@@ -35,6 +36,19 @@ bcftools view --no-version -Ob -o calls.bcf calls.vcf
 bcftools index -c -o calls.bcf.csi calls.bcf
 minimap2 -d ref.mmi ref.fa
 ropebwt3 build -d -o ref.fmd ref.fa
+# Prefix tables of 4 bases keep the index at 20 kB; the default ones take 4 MB
+hisat2-build -q -t 4 --localftabchars 4 --ss ref.ss --exon ref.exon --snp ref.snp --haplotype ref.haplotype ref.fa ref
+# The index files in one tar, owned by nobody and dated 0, as BioChef's
+# hisat2 operations write it
+python3 - <<'PY'
+import tarfile
+with tarfile.open("ref.ht2", "w", format=tarfile.USTAR_FORMAT) as tar:
+    for n in range(1, 9):
+        info = tar.gettarinfo(f"ref.{n}.ht2")
+        info.mode, info.uid, info.gid, info.uname, info.gname, info.mtime = 0o644, 0, 0, "", "", 0
+        with open(f"ref.{n}.ht2", "rb") as f:
+            tar.addfile(info, f)
+PY
 bedToBigBed peaks.bed sizes peaks.bb
 bedGraphToBigWig cov.bedgraph sizes cov.bw
 
@@ -45,5 +59,6 @@ cp calls.bcf "$out/example.bcf"
 cp calls.bcf.csi "$out/example.bcf.csi"
 cp ref.mmi "$out/example.mmi"
 cp ref.fmd "$out/example.fmd"
+cp ref.ht2 "$out/example.ht2"
 cp peaks.bb "$out/example.bb"
 cp cov.bw "$out/example.bw"

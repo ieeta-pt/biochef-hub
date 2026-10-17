@@ -395,6 +395,71 @@ def validate_newick(content):
             return False
     return trees > 0 and depth == 0 and not seen_node
 
+def _hisat2_rows(content, columns):
+    """The data lines of a HISAT2 annotation file, split at tabs, when each
+    has the given number of fields. hisat2 skips lines that start with #."""
+    if not isinstance(content, str):
+        return None
+    rows = []
+    for line in content.strip().split('\n'):
+        line = line.rstrip('\r')
+        if not line or line.startswith('#'):
+            continue
+        fields = line.split('\t')
+        if len(fields) != columns or not all(re.fullmatch(r'\S+', f) for f in fields):
+            return None
+        rows.append(fields)
+    return rows or None
+
+def _hisat2_position(text):
+    """A 0-based position, which hisat2 reads as a 32-bit number"""
+    return re.fullmatch(r'\d+', text) and int(text) < 2**32
+
+def validate_hisat2_ss(content):
+    """Per line: sequence, last base of the exon before the intron, first
+    base of the exon after it, strand"""
+    rows = _hisat2_rows(content, 4)
+    return bool(rows) and all(
+        _hisat2_position(left) and _hisat2_position(right) and int(left) < int(right) and strand in ('+', '-')
+        for _, left, right, strand in rows)
+
+def validate_hisat2_exon(content):
+    """Per line: sequence, first base, last base, strand"""
+    rows = _hisat2_rows(content, 4)
+    return bool(rows) and all(
+        _hisat2_position(left) and _hisat2_position(right) and int(left) <= int(right) and strand in ('+', '-')
+        for _, left, right, strand in rows)
+
+def validate_hisat2_snp(content):
+    """Per line: ID, type, sequence, position, then the other base (single),
+    the length deleted (deletion) or the bases inserted (insertion)"""
+    rows = _hisat2_rows(content, 5)
+    if not rows:
+        return False
+    for _, kind, _, position, data in rows:
+        if not _hisat2_position(position):
+            return False
+        if kind == 'single':
+            valid = re.fullmatch(r'[ACGTacgt]', data)
+        elif kind == 'deletion':
+            valid = re.fullmatch(r'\d+', data) and 0 < int(data) < 2**32
+        elif kind == 'insertion':
+            valid = re.fullmatch(r'[ACGTacgt]{1,32}', data)
+        else:
+            valid = False
+        if not valid:
+            return False
+    return True
+
+def validate_hisat2_haplotype(content):
+    """Per line: ID, sequence, first base, last base, SNP IDs separated by
+    commas"""
+    rows = _hisat2_rows(content, 5)
+    return bool(rows) and all(
+        _hisat2_position(left) and _hisat2_position(right) and int(left) <= int(right)
+        and re.fullmatch(r'[^,]+(,[^,]+)*', snps)
+        for _, _, left, right, snps in rows)
+
 ALL_TYPES = [
     {'type': 'FASTA', 'validator': validate_fasta},
     {'type': 'Multi-FASTA', 'validator': validate_multi_fasta},
@@ -419,6 +484,10 @@ ALL_TYPES = [
     {'type': 'SND', 'validator': validate_snd},
     {'type': 'FAI', 'validator': validate_fai},
     {'type': 'NEWICK', 'validator': validate_newick},
+    {'type': 'HISAT2_SS', 'validator': validate_hisat2_ss},
+    {'type': 'HISAT2_EXON', 'validator': validate_hisat2_exon},
+    {'type': 'HISAT2_SNP', 'validator': validate_hisat2_snp},
+    {'type': 'HISAT2_HAPLOTYPE', 'validator': validate_hisat2_haplotype},
     {'type': 'TEXT', 'validator': lambda x: True},  # Default fallback
 ]
 
