@@ -1,3 +1,9 @@
+from pathlib import Path
+
+# Binary examples cannot live in this file, so they are files in examples/,
+# made from the text examples by examples/make-examples.sh.
+EXAMPLES_DIR = Path(__file__).resolve().parent / "examples"
+
 TYPE_DEFINITIONS = [
     {
         "id": "JSON",
@@ -115,7 +121,8 @@ TYPE_DEFINITIONS = [
         "id": "BCF",
         "input": True,
         "output": True,
-        "kind": "binary"
+        "kind": "binary",
+        "example_file": "example.bcf",
     },
     {
         "id": "SAM",
@@ -132,54 +139,70 @@ TYPE_DEFINITIONS = [
         "id": "BAI",
         "input": True,
         "output": True,
-        "kind": "binary"
+        "kind": "binary",
+        "example_file": "example.bam.bai",
     },
     {
         "id": "MMI",
         "input": True,
         "output": True,
-        "kind": "binary"
+        "kind": "binary",
+        "example_file": "example.mmi",
     },
     {
         "id": "CSI",
         "input": True,
         "output": True,
-        "kind": "binary"
+        "kind": "binary",
+        "example_file": "example.bcf.csi",
     },
     {
         "id": "FAI",
         "input": True,
         "output": True,
+        "example": "seq\t98\t5\t98\t99",
     },
     {
         "id": "BAM",
         "input": True,
         "output": True,
-        "kind": "binary"
+        "kind": "binary",
+        "example_file": "example.bam",
     },
     {
         "id": "CRAM",
         "input": True,
         "output": True,
-        "kind": "binary"
+        "kind": "binary",
+        "example_file": "example.cram",
     },
     {
         "id": "BIGBED",
         "input": True,
         "output": True,
-        "kind": "binary"
+        "kind": "binary",
+        "example_file": "example.bb",
     },
     {
         "id": "BIGWIG",
         "input": True,
         "output": True,
-        "kind": "binary"
+        "kind": "binary",
+        "example_file": "example.bw",
     },
     {
         "id": "FMD",
         "input": True,
         "output": True,
-        "kind": "binary"
+        "kind": "binary",
+        "example_file": "example.fmd",
+    },
+    {
+        "id": "PSMC_CPG",
+        "input": True,
+        "output": True,
+        "kind": "binary",
+        "example_file": "example.cpg",
     },
     {
         "id": "BED",
@@ -239,6 +262,62 @@ TYPE_DEFINITIONS = [
             "((A:0.3,C:0.3)90:0.4,(B:0.3,D:0.3)90:0.4);"
         ),
     },
+    {
+        "id": "PSMC",
+        "input": True,
+        "output": True,
+        "example": (
+            'CC\n'
+            'CC\tBrief Description of the file format:\n'
+            'CC\t  CC  comments\n'
+            'CC\t  MM  useful-messages\n'
+            'CC\t  RD  round-of-iterations\n'
+            'CC\t  LL  \\log[P(sequence)]\n'
+            'CC\t  QD  Q-before-opt Q-after-opt\n'
+            'CC\t  TR  \\theta_0 \\rho_0\n'
+            'CC\t  RS  k t_k \\lambda_k \\pi_k \\sum_{l\\not=k}A_{kl} A_{kk}\n'
+            'CC\t  DC  begin end best-k t_k+\\Delta_k max-prob\n'
+            'CC\n'
+            'MM\tVersion: 0.6.5-r74-dirty\n'
+            'MM\tpattern:1+1+1+1, n:3, n_free_lambdas:4\n'
+            'MM\tn_iterations:1, skip:1, max_t:15, theta/rho:4\n'
+            'MM\tis_decoding:0\n'
+            'MM\tn_seqs:1, sum_L:65, sum_n:3\n'
+            'RD\t0\n'
+            'LK\t0.000000\n'
+            'QD\t0.000000 -> 0.000000\n'
+            'RI\tinf\n'
+            'TR\t0.047253\t0.011813\n'
+            'MT\t15.000000\n'
+            'MM\tC_pi: 1.000000, n_recomb: 0.763351\n'
+            'RS\t0\t0.000000\t1.000000\t0.266770\t0.349472\t0.000000\n'
+            'RS\t1\t0.432507\t1.000000\t0.446281\t0.584634\t0.000000\n'
+            'RS\t2\t2.735641\t1.000000\t0.050300\t0.065894\t0.000000\n'
+            'RS\t3\t15.000000\t1.000000\t0.000000\t0.000000\t0.000000\n'
+            'PA\t1+1+1+1 0.047252885 0.011813221 15.000000000 1.000000000 1.000000000 1.000000000 1.000000000\n'
+            '//\n'
+            'IT\t50008\n'
+            'RD\t1\n'
+            'LK\t-12.748373\n'
+            'QD\t-0.304372 -> -0.072240\n'
+            'RI\t0.0011439472\n'
+            'TR\t1.418623\t0.775098\n'
+            'MT\t0.104141\n'
+            'MM\tC_pi: 0.034110, n_recomb: 1.696070\n'
+            'RS\t0\t0.000000\t0.440567\t0.099501\t0.058666\t0.068804\n'
+            'RS\t1\t0.026856\t0.008736\t1.563930\t0.922091\t0.915310\n'
+            'RS\t2\t0.060924\t0.000175\t0.032638\t0.019244\t0.015886\n'
+            'RS\t3\t0.104141\t0.033600\t0.000000\t0.000000\t0.000000\n'
+            'PA\t1+1+1+1 1.418623375 0.775097807 0.104141235 0.440567017 0.008735657 0.000175476 0.033599854\n'
+            '//'
+        ),
+    },
+    {
+        "id": "PSMC_PARAMS",
+        "input": True,
+        "output": True,
+        "example": "4+5*3+4 0.274400271 0.007093592 2.260467171 1685167.091007381 0.098469252 76061.673035966 3.400960683 0.033475147 0.001966313 0.001944450",
+    },
 ]
 
 
@@ -255,11 +334,14 @@ def get_allowed_output_types():
 
 
 def get_example_inputs():
-    return {
-        type_def["id"]: type_def["example"]
-        for type_def in TYPE_DEFINITIONS
-        if "example" in type_def
-    }
+    """Maps each type with an example to it: str for text types, bytes for binary ones."""
+    examples = {}
+    for type_def in TYPE_DEFINITIONS:
+        if "example" in type_def:
+            examples[type_def["id"]] = type_def["example"]
+        elif "example_file" in type_def:
+            examples[type_def["id"]] = (EXAMPLES_DIR / type_def["example_file"]).read_bytes()
+    return examples
 
 
 def is_binary_type(type_id):
@@ -283,6 +365,12 @@ def validate_type_examples():
 
     for type_def in TYPE_DEFINITIONS:
         type_id = type_def["id"]
+
+        if "example_file" in type_def:
+            path = EXAMPLES_DIR / type_def["example_file"]
+            if not path.is_file() or path.stat().st_size == 0:
+                failures.append(f"{type_id}: example file {path.name} is missing or empty")
+            continue
 
         if "example" not in type_def:
             continue
