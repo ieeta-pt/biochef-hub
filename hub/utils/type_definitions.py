@@ -254,6 +254,72 @@ TYPE_DEFINITIONS = [
             "((A:0.2,B:0.2)95:0.3,(C:0.2,D:0.2)95:0.3);\n"
             "((A:0.3,C:0.3)90:0.4,(B:0.3,D:0.3)90:0.4);"
         ),
+    },    {
+        # velveth's output: a tar of the Sequences and Roadmaps files it
+        # writes, which velvetg reads to assemble the reads.
+        "id": "VELVET_HASH",
+        "input": True,
+        "output": True,
+        "kind": "binary",
+        "example_file": "example.velveth",
+    },
+    {
+        # velvetg's stats.txt: a header naming the columns, then per node of
+        # the graph its ID, length, arcs out and in, coverages per category
+        # of reads, and numbers of reads.
+        "id": "VELVET_STATS",
+        "input": True,
+        "output": True,
+        "example": (
+            "ID\tlgth\tout\tin\tlong_cov\tshort1_cov\tshort1_Ocov\tshort2_cov\tshort2_Ocov\tlong_nb\tshort1_nb\tshort2_nb\n"
+            "1\t180\t0\t0\t0.000000\t1.833333\t1.833333\t0.000000\t0.000000\t0\t6\t0"
+        ),
+    },
+    {
+        # velvetg's LastGraph: the numbers of nodes and reads, k and whether
+        # both strands count, then per node a NODE line with its length and
+        # coverages and its sequence on each strand, the arcs between nodes
+        # (ARC), and where reads lie on nodes (NR) and long reads (SEQ).
+        "id": "VELVET_GRAPH",
+        "input": True,
+        "output": True,
+        "example": (
+            "1\t7\t21\t1\n"
+            "NODE\t1\t180\t330\t330\t0\t0\n"
+            "ATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGCTTAAGGGTTAAGTAAGTGTGATGCATACGCCTTTACTTGCTGTGTCCACCCCATCGGACTGGCATTTTTATTACACTCAGAAACAGAACTCGGGTAATTTTGACAGGTCACGCAGAGGCGCGCCCTCCTGAAGTGCGTG\n"
+            "GCCTCTGCGTGACCTGTCAAAATTACCCGAGTTCTGTTTCTGAGTGTAATAAAAATGCCAGTCCGATGGGGTGGACACAGCAAGTAAAGGCGTATGCATCACACTTACTTAACCCTTAAGCGATTCACACTGGGCCAACAAGTTTCGTGCTGACGTGTATGTTATGTAATTGTCTTTAGC\n"
+            "NR\t1\t6\n"
+            "2\t0\t0\n"
+            "3\t30\t0\n"
+            "4\t60\t0\n"
+            "5\t90\t0\n"
+            "6\t120\t0\n"
+            "7\t150\t0"
+        ),
+    },
+    {
+        # An AMOS assembly, as velvetg writes it: messages such as {RED}
+        # (a read), {CTG} (a contig) and {TLE} (where a read lies in it),
+        # with a field per line and fields of several lines ending at a
+        # line holding a dot.
+        "id": "AFG",
+        "input": True,
+        "output": True,
+        "example": (
+            "{RED\niid:1\neid:1\nseq:\nGCTAAAGACAATTACATAACATACACGTCAGCACGAAACT\n.\nqlt:\nGCTAAAGACAATTACATAACATACACGTCAGCACGAAACT\n.\n}\n"
+            "{CTG\niid:1\neid:1-0\nseq:\nGCTAAAGACAATTACATAACATACACGTCAGCACGAAACT\n.\nqlt:\nGCTAAAGACAATTACATAACATACACGTCAGCACGAAACT\n.\n"
+            "{TLE\nsrc:1\noff:0\nclr:0,40\n}\n}"
+        ),
+    },
+    {
+        # velvetg's contig alignments to reference sequences: per contig a
+        # >contig_ID line, then a line per stretch on a reference: its first
+        # and last base in the contig, the reference, and its first and last
+        # base there, tab-separated.
+        "id": "VELVET_ALIGNMENTS",
+        "input": True,
+        "output": True,
+        "example": ">contig_1\n1\t98\tseq\t1\t98",
     },
 ]
 

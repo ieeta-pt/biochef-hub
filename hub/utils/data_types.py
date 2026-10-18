@@ -395,6 +395,95 @@ def validate_newick(content):
             return False
     return trees > 0 and depth == 0 and not seen_node
 
+def validate_velvet_stats(content):
+    """velvetg's stats.txt: a header naming the columns, from ID, lgth, out,
+    in and long_cov, then a row of numbers per node"""
+    if not isinstance(content, str):
+        return False
+    lines = content.rstrip('\n').split('\n')
+    header = lines[0].rstrip('\r').split('\t')
+    if header[:5] != ['ID', 'lgth', 'out', 'in', 'long_cov']:
+        return False
+    for line in lines[1:]:
+        fields = line.rstrip('\r').split('\t')
+        if len(fields) != len(header) or not all(re.fullmatch(r'\d+', f) for f in fields[:4]):
+            return False
+        try:
+            [float(f) for f in fields[4:]]
+        except ValueError:
+            return False
+    return True
+
+def validate_velvet_graph(content):
+    """velvetg's LastGraph: the numbers of nodes and reads, k (and whether
+    both strands count), then per node a NODE line and its sequence on each
+    strand, and ARC, NR and SEQ lines with the lines of numbers after them"""
+    if not isinstance(content, str):
+        return False
+    lines = [line.rstrip('\r') for line in content.rstrip('\n').split('\n')]
+    header = lines[0].split('\t')
+    if len(header) not in (3, 4) or not all(re.fullmatch(r'\d+', f) for f in header):
+        return False
+    nodes, i = 0, 1
+    while i < len(lines):
+        fields = lines[i].split('\t')
+        if fields[0] == 'NODE':
+            if len(fields) < 4 or not all(re.fullmatch(r'-?\d+', f) for f in fields[1:]):
+                return False
+            if i + 2 >= len(lines) or not all(re.fullmatch(r'[ACGTN]*', lines[j]) for j in (i + 1, i + 2)):
+                return False
+            nodes += 1
+            i += 3
+        elif fields[0] in ('ARC', 'NR', 'SEQ') or re.fullmatch(r'-?\d+', fields[0]):
+            if not all(re.fullmatch(r'-?\d+', f) for f in fields[1:]) or len(fields) < 2:
+                return False
+            i += 1
+        else:
+            return False
+    return nodes == int(header[0])
+
+def validate_afg(content):
+    """An AMOS message file: messages from {XXX to }, which may hold others,
+    with a field per line (name:value) or fields of several lines ending at
+    a line holding a dot"""
+    if not isinstance(content, str):
+        return False
+    depth, messages, in_field = 0, 0, False
+    for line in content.rstrip('\n').split('\n'):
+        line = line.rstrip('\r')
+        if in_field:
+            in_field = line != '.'
+        elif re.fullmatch(r'\{[A-Z]{3}', line):
+            depth += 1
+            messages += 1
+        elif line == '}':
+            if not depth:
+                return False
+            depth -= 1
+        elif depth and re.fullmatch(r'[a-z]{3}:.*', line):
+            in_field = line.endswith(':')
+        else:
+            return False
+    return messages > 0 and depth == 0 and not in_field
+
+def validate_velvet_alignments(content):
+    """velvetg's contig-alignments.psa: per contig a >contig_ID line, then a
+    line per stretch on a reference: first and last base in the contig, the
+    reference, and first and last base there"""
+    if not isinstance(content, str):
+        return False
+    lines = content.rstrip('\n').split('\n')
+    if not re.fullmatch(r'>contig_\d+', lines[0].rstrip('\r')):
+        return False
+    for line in lines[1:]:
+        line = line.rstrip('\r')
+        if re.fullmatch(r'>contig_\d+', line):
+            continue
+        fields = line.split('\t')
+        if len(fields) < 5 or not all(re.fullmatch(r'-?\d+', f) for f in fields[:2] + fields[-2:]):
+            return False
+    return True
+
 ALL_TYPES = [
     {'type': 'FASTA', 'validator': validate_fasta},
     {'type': 'Multi-FASTA', 'validator': validate_multi_fasta},
@@ -419,6 +508,10 @@ ALL_TYPES = [
     {'type': 'SND', 'validator': validate_snd},
     {'type': 'FAI', 'validator': validate_fai},
     {'type': 'NEWICK', 'validator': validate_newick},
+    {'type': 'VELVET_STATS', 'validator': validate_velvet_stats},
+    {'type': 'VELVET_GRAPH', 'validator': validate_velvet_graph},
+    {'type': 'AFG', 'validator': validate_afg},
+    {'type': 'VELVET_ALIGNMENTS', 'validator': validate_velvet_alignments},
     {'type': 'TEXT', 'validator': lambda x: True},  # Default fallback
 ]
 
