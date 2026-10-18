@@ -393,6 +393,38 @@ def validate_newick(content):
             return False
     return trees > 0 and depth == 0 and not seen_node
 
+CDHIT_MEMBER = re.compile(
+    r'(\d+)\t\d+(?:aa|nt), >[ \t]?\S*\.\.\. '
+    r'(\*|at (?:\d+:\d+:\d+:\d+/)?(?:[+-]/)?\d+\.\d\d%(?:/\d+\.\d\d%)?)'
+)
+
+def validate_cdhit_clstr(content):
+    """cd-hit's .clstr file: per cluster a line >Cluster N, numbered from 0,
+    then a line per member, numbered from 0 in each cluster, with its length,
+    its name and either * for the representative or its identity to it,
+    after the ends of the alignment (-p 1), the strand (nucleotides) and
+    before the distance (-D)"""
+    if not isinstance(content, str):
+        return False
+    clusters, members, representatives = -1, 0, 0
+    for line in content.rstrip('\n').split('\n'):
+        line = line.rstrip('\r')
+        cluster = re.fullmatch(r'>Cluster (\d+)', line)
+        if cluster:
+            if clusters >= 0 and (not members or representatives != 1):
+                return False
+            clusters += 1
+            if int(cluster.group(1)) != clusters:
+                return False
+            members, representatives = 0, 0
+            continue
+        member = CDHIT_MEMBER.fullmatch(line)
+        if not member or clusters < 0 or int(member.group(1)) != members:
+            return False
+        members += 1
+        representatives += member.group(2) == '*'
+    return clusters >= 0 and members > 0 and representatives == 1
+
 ALL_TYPES = [
     {'type': 'FASTA', 'validator': validate_fasta},
     {'type': 'Multi-FASTA', 'validator': validate_multi_fasta},
@@ -417,6 +449,7 @@ ALL_TYPES = [
     {'type': 'SND', 'validator': validate_snd},
     {'type': 'FAI', 'validator': validate_fai},
     {'type': 'NEWICK', 'validator': validate_newick},
+    {'type': 'CDHIT_CLSTR', 'validator': validate_cdhit_clstr},
     {'type': 'TEXT', 'validator': lambda x: True},  # Default fallback
 ]
 
