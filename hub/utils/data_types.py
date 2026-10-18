@@ -393,6 +393,45 @@ def validate_newick(content):
             return False
     return trees > 0 and depth == 0 and not seen_node
 
+GENEFUSE_GENE = re.compile(r' *> *([ -+\--~]*?) *, *([!-+\--9;-~]+) *: *(\d+) *- *(\d+) *')
+GENEFUSE_EXON = re.compile(r' *(\d+) *, *(\d+) *, *(\d+) *')
+
+def validate_genefuse_csv(content):
+    """GeneFuse's fusion file: per gene a line >name,chromosome:start-end,
+    then a line per exon, number,start,end, numbered up by one from 1 or
+    after, within the gene and along it, or the other way when the gene is
+    on the reverse strand; blank lines and lines starting with # aside"""
+    if not isinstance(content, str):
+        return False
+    genes, exons = 0, 0
+    for line in content.split('\n'):
+        line = line.rstrip('\r')
+        if not line.strip(' ') or line.lstrip(' ').startswith('#'):
+            continue
+        gene = GENEFUSE_GENE.fullmatch(line)
+        if gene:
+            if genes and not exons:
+                return False
+            start, end = int(gene.group(3)), int(gene.group(4))
+            if not gene.group(1) or gene.group(1) == 'invalid' or start < 1 or end - start <= 16:
+                return False
+            genes, exons = genes + 1, 0
+            continue
+        exon = GENEFUSE_EXON.fullmatch(line)
+        if not exon or not genes:
+            return False
+        number, first, last = (int(g) for g in exon.groups())
+        if first > last or first < start or last > end:
+            return False
+        if exons and number != previous[0] + 1 or not exons and number < 1:
+            return False
+        if exons == 1:
+            reversed_ = first < previous[1]
+        if exons and (last >= previous[1] if reversed_ else first <= previous[2]):
+            return False
+        previous, exons = (number, first, last), exons + 1
+    return genes > 0 and exons > 0
+
 ALL_TYPES = [
     {'type': 'FASTA', 'validator': validate_fasta},
     {'type': 'Multi-FASTA', 'validator': validate_multi_fasta},
@@ -417,6 +456,7 @@ ALL_TYPES = [
     {'type': 'SND', 'validator': validate_snd},
     {'type': 'FAI', 'validator': validate_fai},
     {'type': 'NEWICK', 'validator': validate_newick},
+    {'type': 'GENEFUSE_CSV', 'validator': validate_genefuse_csv},
     {'type': 'TEXT', 'validator': lambda x: True},  # Default fallback
 ]
 
