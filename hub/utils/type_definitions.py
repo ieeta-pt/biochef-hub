@@ -255,6 +255,37 @@ TYPE_DEFINITIONS = [
             "((A:0.3,C:0.3)90:0.4,(B:0.3,D:0.3)90:0.4);"
         ),
     },
+    {
+        # A kallisto index, of version 13 (kallisto 0.50 and later); the
+        # example is the index of the 230 bp the FASTQ example's reads tile
+        "id": "KALLISTO_INDEX",
+        "input": True,
+        "output": True,
+        "kind": "binary",
+        "example_file": "example.kallisto.idx",
+    },
+    {
+        # kallisto quant's abundances: a TSV of target_id, length,
+        # eff_length, est_counts and tpm
+        "id": "KALLISTO_ABUNDANCE",
+        "input": False,
+        "output": True,
+    },
+    {
+        # kallisto bus's equivalence classes (matrix.ec): each class's number,
+        # and the numbers of its transcripts
+        "id": "KALLISTO_EC",
+        "input": False,
+        "output": True,
+    },
+    {
+        # A BUS file of barcodes, UMIs and equivalence classes, as kallisto
+        # bus writes it
+        "id": "BUS",
+        "input": False,
+        "output": True,
+        "kind": "binary",
+    },
 ]
 
 
