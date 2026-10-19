@@ -1,10 +1,13 @@
 #!/bin/bash
 # Regenerates the binary type examples from the text examples in
 # type_definitions.py, so every binary example describes the same data:
-# the 98 bp sequence "seq", its two paired reads and its one variant.
+# the 98 bp sequence "seq", its two paired reads and its one variant. The
+# kallisto index is of the sequence the FASTQ example's reads come from.
 #
-# Needs samtools, bcftools, minimap2, ropebwt3, bedToBigBed and
+# Needs samtools, bcftools, minimap2, ropebwt3, kallisto, bedToBigBed and
 # bedGraphToBigWig on PATH. Run from anywhere; writes next to this script.
+# Stock kallisto seeds its Bloom filter at random, so its index differs from
+# run to run; the build of ieeta-pt/biochef-recipes fixes the seed.
 set -euo pipefail
 
 out=$(cd "$(dirname "$0")" && pwd)
@@ -21,6 +24,15 @@ examples = {t["id"]: t["example"] for t in td.TYPE_DEFINITIONS if "example" in t
 for type_id, name in [("FASTA", "ref.fa"), ("SAM", "reads.sam"), ("VCF", "calls.vcf")]:
     with open(f"{sys.argv[2]}/{name}", "w") as f:
         f.write(examples[type_id].rstrip("\n") + "\n")
+# The 230 bp sequence the FASTQ example's six reads tile, for the kallisto
+# index, so quant and bus have reads to pseudoalign
+reads = examples["FASTQ"].split("\n")[1::4]
+source = reads[0]
+for read in reads[1:]:
+    overlap = next(n for n in range(len(read), 0, -1) if source.endswith(read[:n]))
+    source += read[overlap:]
+with open(f"{sys.argv[2]}/fastq_source.fa", "w") as f:
+    f.write(">fastq_source\n" + source + "\n")
 PY
 
 cd "$tmp"
@@ -35,6 +47,7 @@ bcftools view --no-version -Ob -o calls.bcf calls.vcf
 bcftools index -c -o calls.bcf.csi calls.bcf
 minimap2 -d ref.mmi ref.fa
 ropebwt3 build -d -o ref.fmd ref.fa
+kallisto index -i fastq_source.kallisto.idx fastq_source.fa
 bedToBigBed peaks.bed sizes peaks.bb
 bedGraphToBigWig cov.bedgraph sizes cov.bw
 
@@ -45,5 +58,6 @@ cp calls.bcf "$out/example.bcf"
 cp calls.bcf.csi "$out/example.bcf.csi"
 cp ref.mmi "$out/example.mmi"
 cp ref.fmd "$out/example.fmd"
+cp fastq_source.kallisto.idx "$out/example.kallisto.idx"
 cp peaks.bb "$out/example.bb"
 cp cov.bw "$out/example.bw"

@@ -395,6 +395,31 @@ def validate_newick(content):
             return False
     return trees > 0 and depth == 0 and not seen_node
 
+def validate_kallisto_abundance(content):
+    """kallisto's abundances: the header target_id, length, eff_length,
+    est_counts and tpm, then a row for each target"""
+    if not isinstance(content, str):
+        return False
+    lines = [line.rstrip('\r') for line in content.split('\n') if line.strip()]
+    if not lines or lines[0].split('\t') != ['target_id', 'length', 'eff_length', 'est_counts', 'tpm']:
+        return False
+    number = r'-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?|-?nan|-?inf'
+    for line in lines[1:]:
+        fields = line.split('\t')
+        if len(fields) != 5 or not fields[0] or not re.fullmatch(r'[0-9]+', fields[1]):
+            return False
+        if not all(re.fullmatch(number, f) for f in fields[2:]):
+            return False
+    return True
+
+def validate_kallisto_ec(content):
+    """kallisto bus's equivalence classes: each line a class's number, a
+    tab, and the comma-separated numbers of its transcripts"""
+    if not isinstance(content, str):
+        return False
+    lines = [line.rstrip('\r') for line in content.split('\n') if line.strip()]
+    return bool(lines) and all(re.fullmatch(r'[0-9]+\t[0-9]+(?:,[0-9]+)*', line) for line in lines)
+
 ALL_TYPES = [
     {'type': 'FASTA', 'validator': validate_fasta},
     {'type': 'Multi-FASTA', 'validator': validate_multi_fasta},
@@ -419,6 +444,8 @@ ALL_TYPES = [
     {'type': 'SND', 'validator': validate_snd},
     {'type': 'FAI', 'validator': validate_fai},
     {'type': 'NEWICK', 'validator': validate_newick},
+    {'type': 'KALLISTO_ABUNDANCE', 'validator': validate_kallisto_abundance},
+    {'type': 'KALLISTO_EC', 'validator': validate_kallisto_ec},
     {'type': 'TEXT', 'validator': lambda x: True},  # Default fallback
 ]
 
