@@ -21,7 +21,7 @@ TYPE_DEFINITIONS = [
         "id": "FASTQ",
         "input": True,
         "output": True,
-        "example": "@seq\nGCTAGCTGATCGTACGTAGCGTATCGTAGCTGATCGTACGATCGTAGCTAGCTGATCGTAGCTAGCTAGCTGATCGTAGCTAGCTGATCGTACGTAGC\n+\nIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII",
+        "example": "@read1\nGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGCTTAAGGGTTAAGTAAGTGT\n+\nIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII\n@read2\nGCACGAAACTTGTTGGCCCAGTGTGAATCGCTTAAGGGTTAAGTAAGTGTGATGCATACGCCTTTACTTGCTGTGTCCAC\n+\nIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII\n@read3\nCTTAAGGGTTAAGTAAGTGTGATGCATACGCCTTTACTTGCTGTGTCCACCCCATCGGACTGGCATTTTTATTACACTCA\n+\nIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII\n@read4\nCCTTTACTTGCTGTGTCCACCCCATCGGACTGGCATTTTTATTACACTCAGAAACAGAACTCGGGTAATTTTGACAGGTC\n+\nIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII\n@read5\nTGGCATTTTTATTACACTCAGAAACAGAACTCGGGTAATTTTGACAGGTCACGCAGAGGCGCGCCCTCCTGAAGTGCGTG\n+\nIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII\n@read6\nTCGGGTAATTTTGACAGGTCACGCAGAGGCGCGCCCTCCTGAAGTGCGTGGACACTCGCTATGAATCTCTGATTTACCCA\n+\nIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII",
     },
     {
         "id": "NUM",
@@ -39,7 +39,17 @@ TYPE_DEFINITIONS = [
         "id": "Multi-FASTA",
         "input": True,
         "output": True,
-        "example": ">seq1_human\nGTTCCAGTAGCGGCGTATCGTAGGTGACGTAGCAGTCGATCGCTAGCGAAGCGCTGACTAGCTCGATAGCGGCTACTCGTACGTAGTACGTAGCATACG\n>seq2_cat\nAGCTGCTGATCGTGATCGAGCTCGATGCATCGATCGCTAGCGTACGTAGCTGACGTAGCGTGACTGATCGTAGCTGATCGTGACGTAGCTGACGTAGCTG",
+        # Four aligned taxa with informative shared substitutions for tree tools.
+        "example": (
+            '>seq1_human\n'
+            'TTGATCCTTAATTGCGGCTTCGATTACTAAAAAACAGGGACAGCATCAACCAAACTGCTTACATTACTGTCGGCGCAACAGCGCGGAAACCGGTTGTTAA\n'
+            '>seq2_cat\n'
+            'TTGACCCTTAACTGCGGCTTCAATTACTAATAAACAGGGAAAGCATTACCCAAACTGCTTACATTACTGTCGGCGCAACAGCGCCGCAACCGATTGTTAA\n'
+            '>seq3_mouse\n'
+            'CTGACGTTTAAATGCGGCTGGAATTATTCAAAAACTGGTGAAGCATTTCCCAAGTTGCTTCCATTACAGTCTGCGGAACAGCGTCGAGAGCGATCGTAAA\n'
+            '>seq4_dog\n'
+            'CTGACGTCGAAATGCGGCTAGTATGATTAAAGAACTGGTAAAGCATTACCCAAATTGCTTCCATTACAGTCTGCGGAACAGCGTCGAAATCGATCGTAAA'
+        ),
     },
     {
         "id": "EFA",
@@ -92,6 +102,14 @@ TYPE_DEFINITIONS = [
         "id": "VCF",
         "input": True,
         "output": True,
+        "example": (
+            "##fileformat=VCFv4.2\n"
+            "##contig=<ID=seq,length=98>\n"
+            "##FILTER=<ID=PASS,Description=\"All filters passed\">\n"
+            "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n"
+            "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tsample\n"
+            "seq\t10\t.\tC\tA\t60\tPASS\t.\tGT\t0/1"
+        ),
     },
     {
         "id": "BCF",
@@ -103,6 +121,12 @@ TYPE_DEFINITIONS = [
         "id": "SAM",
         "input": True,
         "output": True,
+        "example": (
+            "@HD\tVN:1.6\tSO:queryname\n"
+            "@SQ\tSN:seq\tLN:98\n"
+            "read1\t99\tseq\t1\t60\t40M\t=\t59\t98\tTTGCACTGACCTGAAGTCTTGGAGTATGACCGCGGCTCGG\tIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII\n"
+            "read1\t147\tseq\t59\t60\t40M\t=\t1\t-98\tCTAGCGCTATAGGTGGTGCCGAAGGCGGTCTGTCGTCGTA\tIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII"
+        ),
     },
     {
         "id": "BAI",
@@ -140,10 +164,40 @@ TYPE_DEFINITIONS = [
         "kind": "binary"
     },
     {
+        "id": "BIGBED",
+        "input": True,
+        "output": True,
+        "kind": "binary"
+    },
+    {
+        "id": "BIGWIG",
+        "input": True,
+        "output": True,
+        "kind": "binary"
+    },
+    {
+        "id": "FMD",
+        "input": True,
+        "output": True,
+        "kind": "binary"
+    },
+    {
         "id": "BED",
         "input": True,
         "output": True,
         "example": "seq\t0\t10\nseq1\t0\t20",
+    },
+    {
+        "id": "CLUSTAL",
+        "input": True,
+        "output": True,
+        "example": "CLUSTAL format alignment by MAFFT (v7.526)\n\n\nseq1            ACGTACGTAC-GTACGT\nseq2            ACGTACGAACTGTACGT\nseq3            ACGTACGTAC-GTACGA\n                ******* ** ***** \n",
+    },
+    {
+        "id": "SND",
+        "input": True,
+        "output": True,
+        "example": "#sample\tgene1\tgene2\tgene3\ncellA\t0.95\t0\t1.2\ncellB\t0\t0.31\t0.8\ncellC\t1.1\t0.07\t0",
     },
     {
         "id": "GFF",
@@ -152,10 +206,38 @@ TYPE_DEFINITIONS = [
         "example": "seq\t.\tgene\t1\t30\t.\t+\t.\tID=gene1\nseq\t.\tmRNA\t1\t30\t.\t+\t.\tID=tx1;Parent=gene1\nseq\t.\texon\t1\t30\t.\t+\t.\tParent=tx1\nseq\t.\tCDS\t1\t30\t.\t+\t0\tParent=tx1",
     },
     {
+        "id": "GTF",
+        "input": True,
+        "output": True,
+        "example": 'seq\tStringTie\ttranscript\t1\t30\t1000\t+\t.\tgene_id "gene1"; transcript_id "tx1"; FPKM "12.34";\nseq\tStringTie\texon\t1\t30\t1000\t+\t.\tgene_id "gene1"; transcript_id "tx1"; exon_number "1";',
+    },
+    {
+        "id": "PAF",
+        "input": True,
+        "output": True,
+        "example": "queryA\t500\t10\t490\t+\ttargetA\t1000\t100\t580\t470\t480\t60\nqueryB\t300\t0\t300\t-\ttargetA\t1000\t650\t950\t290\t300\t60",
+    },
+    {
+        "id": "GFA",
+        "input": True,
+        "output": True,
+        "example": "H\tVN:Z:1.0\nS\ts1\tACGTACGTACGT\nS\ts2\tTTACGTACGTAC\nL\ts1\t+\ts2\t+\t4M\nP\tp1\ts1+,s2+\t*",
+    },
+    {
         "id": "LIST",
         "input": True,
         "output": True,
         "example": "seq\nseq1\nseq2",
+    },
+    {
+        "id": "NEWICK",
+        "input": True,
+        "output": True,
+        "example": (
+            "((A:0.1,B:0.1)100:0.2,(C:0.1,D:0.1)100:0.2);\n"
+            "((A:0.2,B:0.2)95:0.3,(C:0.2,D:0.2)95:0.3);\n"
+            "((A:0.3,C:0.3)90:0.4,(B:0.3,D:0.3)90:0.4);"
+        ),
     },
 ]
 

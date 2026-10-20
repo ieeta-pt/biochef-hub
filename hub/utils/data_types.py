@@ -178,6 +178,68 @@ def validate_gff(content):
 
     return True
 
+def validate_gtf(content):
+    if not content:
+        return False
+    lines = content.strip().split('\n')
+    for line in lines:
+        if line.startswith('#') or not line.strip():
+            continue
+        fields = line.split('\t')
+        if len(fields) != 9:
+            return False
+        seqid, source, type_, start, end, score, strand, frame, attributes = fields
+        if not start.isdigit() or not end.isdigit():
+            return False
+        if strand not in ['+', '-', '.']:
+            return False
+        if frame not in ['0', '1', '2', '.']:
+            return False
+        # GTF attribute column uses key "value"; quoted-value pairs separated by ';'
+        if 'gene_id' not in attributes and 'transcript_id' not in attributes:
+            return False
+    return True
+
+def validate_paf(content):
+    if not content:
+        return False
+    lines = content.strip().split('\n')
+    for line in lines:
+        if not line.strip():
+            continue
+        fields = line.split('\t')
+        # PAF requires at least 12 mandatory columns
+        if len(fields) < 12:
+            return False
+        # Numeric fields: query_len, query_start, query_end, target_len,
+        # target_start, target_end, matching_bases, alignment_block_len, mapq
+        for idx in (1, 2, 3, 6, 7, 8, 9, 10, 11):
+            if not fields[idx].lstrip('-').isdigit():
+                return False
+        if fields[4] not in ('+', '-'):
+            return False
+    return True
+
+def validate_gfa(content):
+    if not content:
+        return False
+    lines = content.strip().split('\n')
+    has_segment = False
+    for line in lines:
+        if not line.strip():
+            continue
+        fields = line.split('\t')
+        # Every record starts with a one-letter type. GFA1 uses H/S/L/C/P/W/J,
+        # GFA2 adds E/F/G/O/U, and the spec tells readers to skip types they do
+        # not know, which tools rely on: miniasm writes 'a' and 'x' records.
+        if line[0] != '#' and (len(fields[0]) != 1 or not fields[0].isalpha()):
+            return False
+        if fields[0] == 'S':
+            if len(fields) < 3:
+                return False
+            has_segment = True
+    return has_segment
+
 def validate_list(content):
     if not content.strip(): 
         return False 
@@ -189,6 +251,53 @@ def validate_list(content):
         if not seq_id or ' ' in seq_id:
             return False
     return True
+
+def validate_clustal(content):
+    if not content or not content.strip():
+        return False
+    lines = content.strip().split('\n')
+    # Clustal, MAFFT --clustalout and MAFFT f2cl all open with a CLUSTAL banner
+    if not lines[0].startswith('CLUSTAL'):
+        return False
+    has_sequence = False
+    for line in lines[1:]:
+        if not line.strip():
+            continue
+        if line[0].isspace():
+            # conservation line under each block: '*', ':', '.' and spaces
+            if line.strip(' *:.'):
+                return False
+            continue
+        fields = line.split()
+        if len(fields) not in (2, 3):
+            return False
+        if not re.fullmatch(r'[A-Za-z*.\-]+', fields[1]):
+            return False
+        if len(fields) == 3 and not fields[2].isdigit():
+            return False
+        has_sequence = True
+    return has_sequence
+
+def validate_snd(content):
+    # bhtsne's SND table: optional '#' header, then one row per sample,
+    # a name followed by tab-separated numbers, every row the same width
+    if not content or not content.strip():
+        return False
+    width = None
+    for line in content.strip().split('\n'):
+        if not line.strip() or line.startswith('#'):
+            continue
+        fields = line.rstrip('\r').split('\t')
+        if len(fields) < 2:
+            return False
+        if width is None:
+            width = len(fields)
+        elif len(fields) != width:
+            return False
+        for value in fields[1:]:
+            if not re.fullmatch(r'[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?', value):
+                return False
+    return width is not None
 
 def validate_json(content):
     if not content or not content.strip():
@@ -220,6 +329,70 @@ def validate_fai(content):
 
     return True
 
+def validate_newick(content):
+    """Check ordinary Newick syntax, including multiple trees and comments."""
+
+    if not isinstance(content, str):
+        return False
+    if content.startswith("\ufeff"):
+        content = content[1:]
+    if not content.strip(" \t\r\n"):
+        return False
+
+    tokens = re.compile(r"[ \t\r\n]+|'(?:[^'\r\n]|'')*'|[(),:;]|[^ \t\r\n(),:;\[\]']+")
+    number = re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
+    pos = depth = trees = 0
+    state, seen_node = "node", False
+    while pos < len(content):
+        if content[pos] == "[":
+            comments = 1
+            pos += 1
+            while pos < len(content) and comments:
+                comments += (content[pos] == "[") - (content[pos] == "]")
+                pos += 1
+            if comments:
+                return False
+            continue
+        match = tokens.match(content, pos)
+        if not match:
+            return False
+        token, pos = match.group(), match.end()
+        if token[0] in " \t\r\n":
+            continue
+        if token == "(":
+            if state != "node":
+                return False
+            depth += 1
+            seen_node = True
+        elif token == ")":
+            if not depth or state == "length":
+                return False
+            depth -= 1
+            state = "label"
+        elif token == ",":
+            if not depth or state == "length":
+                return False
+            state = "node"
+        elif token == ":":
+            if state not in ("node", "label", "suffix"):
+                return False
+            state = "length"
+            seen_node = True
+        elif token == ";":
+            if depth or state == "length":
+                return False
+            trees += 1
+            state, seen_node = "node", False
+        elif state == "length":
+            if not number.fullmatch(token):
+                return False
+            state = "end"
+        elif state in ("node", "label") and token.replace("\t", "").isprintable():
+            state, seen_node = "suffix", True
+        else:
+            return False
+    return trees > 0 and depth == 0 and not seen_node
+
 ALL_TYPES = [
     {'type': 'FASTA', 'validator': validate_fasta},
     {'type': 'Multi-FASTA', 'validator': validate_multi_fasta},
@@ -236,8 +409,14 @@ ALL_TYPES = [
     {'type': 'BED', 'validator': validate_bed},
     {'type': 'LIST', 'validator': validate_list},
     {'type': 'GFF', 'validator': validate_gff},
+    {'type': 'GTF', 'validator': validate_gtf},
+    {'type': 'PAF', 'validator': validate_paf},
+    {'type': 'GFA', 'validator': validate_gfa},
     {'type': 'JSON', 'validator': validate_json},
+    {'type': 'CLUSTAL', 'validator': validate_clustal},
+    {'type': 'SND', 'validator': validate_snd},
     {'type': 'FAI', 'validator': validate_fai},
+    {'type': 'NEWICK', 'validator': validate_newick},
     {'type': 'TEXT', 'validator': lambda x: True},  # Default fallback
 ]
 
