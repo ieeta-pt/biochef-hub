@@ -1,5 +1,6 @@
 import re
 import json
+import zlib
 
 def validate_fasta(content):
     lines = content.strip().split('\n') if content else []
@@ -242,6 +243,36 @@ def validate_gfa(content):
             has_segment = True
     return has_segment
 
+def validate_gvcf(content):
+    # A gVCF is a VCF that also covers the reference stretches between its
+    # variants, in blocks: a record whose ALT is only the "no variant here"
+    # allele and whose END says where the block stops. GATK writes that allele
+    # as <NON_REF>, DeepVariant as <*> and bcftools call -g as "."; GATK also
+    # declares its block bands in ##GVCFBlock lines. A structural variant's
+    # END (ALT <DEL> and the like) is not a block.
+    if not validate_vcf(content):
+        return False
+    for line in content.strip().split('\n'):
+        if line.startswith('##GVCFBlock'):
+            return True
+        if line.startswith('#'):
+            continue
+        fields = line.split('\t')
+        if len(fields) >= 8 and fields[4] in ('.', '<*>', '<NON_REF>') \
+                and re.search(r'(^|;)END=\d+(;|$)', fields[7]):
+            return True
+    return False
+
+def validate_sample_list(content):
+    # Sample names, one per line, as bcftools query -l writes them and
+    # bcftools view -S, vt subset -s and the like read them. A name cannot
+    # hold a tab, which separates the columns of a VCF, and a line opening
+    # with '>', '@' or '#' is a FASTA, FASTQ or VCF header, not a name.
+    if not content or not content.strip():
+        return False
+    return all(line.strip() and '\t' not in line and line[0] not in '>@#'
+               for line in content.strip().split('\n'))
+
 def validate_list(content):
     if not content.strip(): 
         return False 
@@ -406,10 +437,14 @@ ALL_TYPES = [
     {'type': 'DNA', 'validator': validate_dna},
     {'type': 'RNA', 'validator': validate_rna},
     {'type': 'AminoAcids', 'validator': validate_amino_acids},
+    {'type': 'GVCF', 'validator': validate_gvcf},
     {'type': 'VCF', 'validator': validate_vcf},
     {'type': 'SAM', 'validator': validate_sam},
     {'type': 'BED', 'validator': validate_bed},
     {'type': 'LIST', 'validator': validate_list},
+    # A list of names looks like much plain text, so it is only chosen where a
+    # list of samples is expected
+    {'type': 'SAMPLE_LIST', 'validator': validate_sample_list, 'only_when_expected': True},
     {'type': 'GFF', 'validator': validate_gff},
     {'type': 'GTF', 'validator': validate_gtf},
     {'type': 'PAF', 'validator': validate_paf},
@@ -433,8 +468,112 @@ def detect_data_type(data, expected=[]):
 
     # Then check remaining types
     for type_info in ALL_TYPES:
-        if type_info['type'] == 'TEXT': continue
+        if type_info['type'] == 'TEXT' or type_info.get('only_when_expected'): continue
         if type_info['type'] not in expected and type_info['validator'](data):
             return type_info['type']
 
     return 'UNKNOWN' if data else None
+
+
+# Binary types. BGZF, the blocked gzip of htslib, compresses BAM, BCF, the
+# CSI and tabix indexes, and bgzipped VCF alike, so its gzip header says
+# nothing about what is inside: the type is in the first bytes of the
+# inflated data. Plain gzip (no BC extra field) is not BGZF and cannot be
+# indexed, so it is not taken as any of these.
+BGZF_INFLATE_LIMIT = 1 << 20
+
+def bgzf_inflate(data, limit=BGZF_INFLATE_LIMIT):
+    """Inflates the BGZF blocks at the start of data, up to about limit bytes.
+
+    Returns (bytes, complete): complete is True when the whole file was
+    inflated. Returns (None, False) when data does not start with a BGZF block.
+    """
+    out = bytearray()
+    pos = 0
+    while pos < len(data):
+        if len(out) >= limit:
+            return bytes(out), False
+        head = data[pos:pos + 12]
+        if len(head) < 12 or head[:4] != b'\x1f\x8b\x08\x04':
+            break
+        xlen = int.from_bytes(head[10:12], 'little')
+        extra = data[pos + 12:pos + 12 + xlen]
+        bsize = None
+        i = 0
+        while i + 4 <= len(extra):
+            slen = int.from_bytes(extra[i + 2:i + 4], 'little')
+            if extra[i:i + 2] == b'BC' and slen == 2:
+                bsize = int.from_bytes(extra[i + 4:i + 6], 'little')
+            i += 4 + slen
+        end = pos + (bsize or 0) + 1
+        if bsize is None or end > len(data):
+            break
+        try:
+            out += zlib.decompressobj(-15).decompress(data[pos + 12 + xlen:end - 8])
+        except zlib.error:
+            break
+        pos = end
+    if pos == 0:
+        return None, False
+    return bytes(out), pos == len(data)
+
+def _starts_with(magic, inflated=False):
+    def check(data):
+        if not inflated:
+            return data[:len(magic)] == magic
+        text, _ = bgzf_inflate(data, len(magic))
+        return text is not None and text[:len(magic)] == magic
+    return check
+
+def _magic_raw_or_bgzf(magic):
+    raw, packed = _starts_with(magic), _starts_with(magic, inflated=True)
+    return lambda data: raw(data) or packed(data)
+
+def _bgzf_text(text_validator):
+    def check(data):
+        inflated, complete = bgzf_inflate(data)
+        if not inflated:
+            return False
+        try:
+            text = inflated.decode('utf-8')
+        except UnicodeDecodeError:
+            # A cut through a multi-byte character at the inflate limit
+            text = inflated.decode('utf-8', errors='ignore') if not complete else None
+        if text is None:
+            return False
+        if not complete:
+            text = text[:text.rfind('\n') + 1]
+        return text_validator(text)
+    return check
+
+BINARY_TYPES = [
+    {'type': 'BAM', 'validator': _magic_raw_or_bgzf(b'BAM\x01')},
+    {'type': 'BCF', 'validator': _magic_raw_or_bgzf(b'BCF\x02')},
+    {'type': 'CRAM', 'validator': _starts_with(b'CRAM')},
+    {'type': 'BAI', 'validator': _starts_with(b'BAI\x01')},
+    {'type': 'CSI', 'validator': _magic_raw_or_bgzf(b'CSI\x01')},
+    {'type': 'TBI', 'validator': _starts_with(b'TBI\x01', inflated=True)},
+    {'type': 'GVCF_GZ', 'validator': _bgzf_text(validate_gvcf)},
+    {'type': 'VCF_GZ', 'validator': _bgzf_text(validate_vcf)},
+    # Any other BGZF file, such as a bgzipped BED, GFF or SAM; after the
+    # specific types above, so that it only takes what they do not
+    {'type': 'BGZF', 'validator': lambda d: bgzf_inflate(d, 1)[0] is not None},
+    {'type': 'MMI', 'validator': _starts_with(b'MMI\x02')},
+    {'type': 'FMD', 'validator': _starts_with(b'RLD\x03')},
+    {'type': 'BIGBED', 'validator': lambda d: d[:4] in (b'\xeb\xf2\x89\x87', b'\x87\x89\xf2\xeb')},
+    {'type': 'BIGWIG', 'validator': lambda d: d[:4] in (b'\x26\xfc\x8f\x88', b'\x88\x8f\xfc\x26')},
+]
+
+BINARY_VALIDATORS = {t['type']: t['validator'] for t in BINARY_TYPES}
+
+def detect_binary_type(data, expected=[]):
+    """Like detect_data_type, for bytes. None when no binary type matches."""
+    if not isinstance(data, (bytes, bytearray)) or not data:
+        return None
+    for type_info in BINARY_TYPES:
+        if type_info['type'] in expected and type_info['validator'](data):
+            return type_info['type']
+    for type_info in BINARY_TYPES:
+        if type_info['type'] not in expected and type_info['validator'](data):
+            return type_info['type']
+    return None

@@ -118,6 +118,59 @@ TYPE_DEFINITIONS = [
         ),
     },
     {
+        "id": "VCF_GZ",
+        "input": True,
+        "output": True,
+        "kind": "binary",
+        "example_file": "example.vcf.gz",
+    },
+    {
+        "id": "GVCF",
+        "input": True,
+        "output": True,
+        "example": (
+            "##fileformat=VCFv4.2\n"
+            "##ALT=<ID=*,Description=\"Represents allele(s) other than observed.\">\n"
+            "##contig=<ID=seq,length=98>\n"
+            "##INFO=<ID=END,Number=1,Type=Integer,Description=\"End position of the reference block\">\n"
+            "##INFO=<ID=MIN_DP,Number=1,Type=Integer,Description=\"Minimum depth in the reference block\">\n"
+            "##FILTER=<ID=PASS,Description=\"All filters passed\">\n"
+            "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n"
+            "##FORMAT=<ID=DP,Number=1,Type=Integer,Description=\"Read depth\">\n"
+            "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tsample\n"
+            "seq\t1\t.\tT\t<*>\t.\t.\tEND=9;MIN_DP=2\tGT:DP\t0/0:2\n"
+            "seq\t10\t.\tC\tA,<*>\t60\tPASS\t.\tGT:DP\t0/1:2\n"
+            "seq\t11\t.\tC\t<*>\t.\t.\tEND=98;MIN_DP=1\tGT:DP\t0/0:1"
+        ),
+    },
+    {
+        "id": "GVCF_GZ",
+        "input": True,
+        "output": True,
+        "kind": "binary",
+        "example_file": "example.g.vcf.gz",
+    },
+    {
+        "id": "BGZF",
+        "input": True,
+        "output": True,
+        "kind": "binary",
+        "example_file": "example.bed.gz",
+    },
+    {
+        "id": "TBI",
+        "input": True,
+        "output": True,
+        "kind": "binary",
+        "example_file": "example.vcf.gz.tbi",
+    },
+    {
+        "id": "SAMPLE_LIST",
+        "input": True,
+        "output": True,
+        "example": "sample",
+    },
+    {
         "id": "BCF",
         "input": True,
         "output": True,
@@ -294,7 +347,7 @@ def is_binary_type(type_id):
 
 
 def validate_type_examples():
-    from utils.data_types import ALL_TYPES
+    from utils.data_types import ALL_TYPES, BINARY_VALIDATORS
 
     validators = {type_info["type"]: type_info["validator"]
                   for type_info in ALL_TYPES}
@@ -307,6 +360,8 @@ def validate_type_examples():
             path = EXAMPLES_DIR / type_def["example_file"]
             if not path.is_file() or path.stat().st_size == 0:
                 failures.append(f"{type_id}: example file {path.name} is missing or empty")
+            elif type_id in BINARY_VALIDATORS and not BINARY_VALIDATORS[type_id](path.read_bytes()):
+                failures.append(f"{type_id}: example file {path.name} does not validate as {type_id}")
             continue
 
         if "example" not in type_def:
