@@ -362,6 +362,15 @@ def validate_fai(content):
 
     return True
 
+def validate_vcf_header(content):
+    # VCF meta-information lines, "##key=value" or "##key=<...>", as bcftools
+    # annotate -h adds to a header; without the #CHROM line, which they
+    # would follow
+    if not content or not content.strip():
+        return False
+    return all(re.match(r'##[A-Za-z0-9_.-]+=.', line)
+               for line in content.strip().split('\n'))
+
 def validate_chrom_sizes(content):
     # A genome file: one line per sequence, its name and its length, as
     # UCSC's chrom.sizes and bedtools' -g files are
@@ -446,6 +455,7 @@ ALL_TYPES = [
     {'type': 'FASTQ', 'validator': validate_fastq},
     {'type': 'PackagedFASTQ', 'validator': validate_packaged_fastq},
     {'type': 'CLUSTAL', 'validator': validate_clustal},
+    {'type': 'VCF_HEADER', 'validator': validate_vcf_header},
     {'type': 'GVCF', 'validator': validate_gvcf},
     {'type': 'VCF', 'validator': validate_vcf},
     {'type': 'PAF', 'validator': validate_paf},

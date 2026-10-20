@@ -118,6 +118,12 @@ TYPE_DEFINITIONS = [
         ),
     },
     {
+        "id": "VCF_HEADER",
+        "input": True,
+        "output": True,
+        "example": "##INFO=<ID=TAG,Number=1,Type=Integer,Description=\"An added tag\">",
+    },
+    {
         "id": "VCF_GZ",
         "input": True,
         "output": True,
