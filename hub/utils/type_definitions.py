@@ -210,6 +210,12 @@ TYPE_DEFINITIONS = [
         "example_file": "example.bcf.csi",
     },
     {
+        "id": "CHROM_SIZES",
+        "input": True,
+        "output": True,
+        "example": "seq\t98",
+    },
+    {
         "id": "FAI",
         "input": True,
         "output": True,
@@ -254,7 +260,7 @@ TYPE_DEFINITIONS = [
         "id": "BED",
         "input": True,
         "output": True,
-        "example": "seq\t0\t10\nseq1\t0\t20",
+        "example": "seq\t0\t10\nseq\t40\t60",
     },
     {
         "id": "CLUSTAL",

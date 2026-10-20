@@ -362,6 +362,17 @@ def validate_fai(content):
 
     return True
 
+def validate_chrom_sizes(content):
+    # A genome file: one line per sequence, its name and its length, as
+    # UCSC's chrom.sizes and bedtools' -g files are
+    if not content or not content.strip():
+        return False
+    for line in content.strip().split('\n'):
+        fields = line.rstrip('\r').split('\t')
+        if len(fields) != 2 or not fields[0] or ' ' in fields[0] or not re.fullmatch(r'[1-9]\d*', fields[1]):
+            return False
+    return True
+
 def validate_newick(content):
     """Check ordinary Newick syntax, including multiple trees and comments."""
 
@@ -427,33 +438,36 @@ def validate_newick(content):
     return trees > 0 and depth == 0 and not seen_node
 
 ALL_TYPES = [
+    # Narrower formats first: detection takes the first type that matches,
+    # and the generic ones (BED, SND, NUM, LIST, TEXT) match much else
     {'type': 'FASTA', 'validator': validate_fasta},
     {'type': 'Multi-FASTA', 'validator': validate_multi_fasta},
     {'type': 'EFA', 'validator': validate_efa},
     {'type': 'FASTQ', 'validator': validate_fastq},
     {'type': 'PackagedFASTQ', 'validator': validate_packaged_fastq},
-    {'type': 'NUM', 'validator': validate_num},
+    {'type': 'CLUSTAL', 'validator': validate_clustal},
+    {'type': 'GVCF', 'validator': validate_gvcf},
+    {'type': 'VCF', 'validator': validate_vcf},
+    {'type': 'PAF', 'validator': validate_paf},
+    {'type': 'SAM', 'validator': validate_sam},
+    {'type': 'GTF', 'validator': validate_gtf},
+    {'type': 'GFF', 'validator': validate_gff},
+    {'type': 'GFA', 'validator': validate_gfa},
+    {'type': 'JSON', 'validator': validate_json},
+    {'type': 'NEWICK', 'validator': validate_newick},
+    {'type': 'FAI', 'validator': validate_fai},
+    {'type': 'CHROM_SIZES', 'validator': validate_chrom_sizes},
+    {'type': 'BED', 'validator': validate_bed},
+    {'type': 'SND', 'validator': validate_snd},
     {'type': 'BIN', 'validator': validate_bin},
+    {'type': 'NUM', 'validator': validate_num},
     {'type': 'DNA', 'validator': validate_dna},
     {'type': 'RNA', 'validator': validate_rna},
     {'type': 'AminoAcids', 'validator': validate_amino_acids},
-    {'type': 'GVCF', 'validator': validate_gvcf},
-    {'type': 'VCF', 'validator': validate_vcf},
-    {'type': 'SAM', 'validator': validate_sam},
-    {'type': 'BED', 'validator': validate_bed},
     {'type': 'LIST', 'validator': validate_list},
     # A list of names looks like much plain text, so it is only chosen where a
     # list of samples is expected
     {'type': 'SAMPLE_LIST', 'validator': validate_sample_list, 'only_when_expected': True},
-    {'type': 'GFF', 'validator': validate_gff},
-    {'type': 'GTF', 'validator': validate_gtf},
-    {'type': 'PAF', 'validator': validate_paf},
-    {'type': 'GFA', 'validator': validate_gfa},
-    {'type': 'JSON', 'validator': validate_json},
-    {'type': 'CLUSTAL', 'validator': validate_clustal},
-    {'type': 'SND', 'validator': validate_snd},
-    {'type': 'FAI', 'validator': validate_fai},
-    {'type': 'NEWICK', 'validator': validate_newick},
     {'type': 'TEXT', 'validator': lambda x: True},  # Default fallback
 ]
 
