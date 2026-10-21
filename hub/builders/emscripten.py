@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from builders.bundle_evidence import (
+    collect_declared_dependencies,
     collect_git_dependencies,
     command_output,
     emsdk_commit,
@@ -44,7 +45,7 @@ def activate_emscripten_version(emscripten_version):
     )
     return True
 
-def build(tool_name, recipe_dir, emscripten_settings, source, output_dir="build"):
+def build(tool_name, recipe_dir, emscripten_settings, source, output_dir="build", dependencies=None):
     repo_url, tag, commit = source
     emscripten_version = emscripten_settings.get("emscriptenVersion")
     evidence = {
@@ -151,7 +152,9 @@ def build(tool_name, recipe_dir, emscripten_settings, source, output_dir="build"
             tag=tag,
             commit=commit,
         )
-        evidence["dependencies"] = collect_git_dependencies(source_dir)
+        evidence["dependencies"] = collect_git_dependencies(source_dir) + collect_declared_dependencies(
+            source_dir, dependencies, "wasm"
+        )
         evidence["scripts"] = [
             {
                 "path": build_script,

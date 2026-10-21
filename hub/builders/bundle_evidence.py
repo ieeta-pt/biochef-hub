@@ -99,20 +99,24 @@ def git_source_evidence(source_dir, repo, tag=None, commit=None):
     }
 
 
-def collect_git_dependencies(source_dir):
+def collect_git_dependencies(source_dir, prefix=""):
     result = git_output(
         ["-C", str(source_dir), "submodule", "status", "--recursive"]
     )
     dependencies = []
     for line in (result or "").splitlines():
-        fields = line.lstrip(" +-U").split()
+        # A leading '-' marks a submodule that was never initialised: it is
+        # not checked out, so nothing was built from it.
+        if line.startswith("-"):
+            continue
+        fields = line.lstrip(" +U").split()
         if len(fields) < 2:
             continue
         path = Path(source_dir) / fields[1]
         dependencies.append(
             {
                 "name": path.name,
-                "path": fields[1],
+                "path": f"{prefix}{fields[1]}",
                 "source": {
                     "kind": "git",
                     "repo": git_output(
@@ -125,12 +129,100 @@ def collect_git_dependencies(source_dir):
     return dependencies
 
 
+def normalize_git_url(value):
+    return (value or "").strip().rstrip("/").removesuffix(".git").lower()
+
+
+def collect_declared_dependencies(source_dir, declared, runtime):
+    """Checks and records the dependencies a build script fetched.
+
+    Each declared dependency must be a git checkout of its own at the
+    declared path, at the declared commit, cloned from the declared
+    repository. Its own submodules are recorded under its path.
+    """
+    source_root = Path(source_dir).resolve()
+    dependencies = []
+    for item in declared or []:
+        if runtime not in (item.get("runtimes") or ("wasm", "native")):
+            continue
+        name = item["name"]
+        checkout = safe_child_path(source_root, item["path"], "build dependency path")
+        toplevel = git_output(["-C", str(checkout), "rev-parse", "--show-toplevel"])
+        if not checkout.is_dir() or not toplevel or Path(toplevel).resolve() != checkout.resolve():
+            raise RuntimeError(
+                f"Build dependency {name} is not a git checkout at {item['path']}"
+            )
+        commit = git_output(["-C", str(checkout), "rev-parse", "HEAD"])
+        if commit != item["commit"]:
+            raise RuntimeError(
+                f"Build dependency {name} is at {commit}, not the declared {item['commit']}"
+            )
+        remote = git_output(["-C", str(checkout), "config", "--get", "remote.origin.url"])
+        if normalize_git_url(remote) != normalize_git_url(item["repo"]):
+            raise RuntimeError(
+                f"Build dependency {name} was cloned from {remote}, not {item['repo']}"
+            )
+        dependencies.append(
+            {
+                "name": name,
+                "path": item["path"],
+                "declared": True,
+                "source": {
+                    "kind": "git",
+                    "repo": remote,
+                    "commit": commit,
+                },
+                "license": copy.deepcopy(item["license"]),
+            }
+        )
+        dependencies.extend(
+            collect_git_dependencies(checkout, prefix=f"{item['path'].rstrip('/')}/")
+        )
+    return dependencies
+
+
 def collect_license_evidence(recipe, target_path, runtime_results=None):
     config = recipe.get("license") or {}
-    license_paths = list(config.get("files") or DEFAULT_LICENSE_FILES)
+    declared_files = list(config.get("files") or [])
+    # Declared files are all required; the defaults are alternatives, and
+    # the first one found is enough.
+    license_paths = declared_files or list(DEFAULT_LICENSE_FILES)
     header_paths = list(config.get("evidence_files") or [])
+    declared_dependencies = (recipe.get("build") or {}).get("dependencies") or []
     target_path = Path(target_path)
     files = []
+
+    def has_license():
+        return any(item["role"] == "license" for item in files)
+
+    def recorded(role, source_path, dependency=None):
+        return any(
+            existing["role"] == role
+            and existing["source_path"] == source_path
+            and existing.get("dependency") == dependency
+            for existing in files
+        )
+
+    def destination_for(role, source_path, dependency=None):
+        evidence_dir = target_path.parent / "license-evidence"
+        if role == "license":
+            return target_path if not has_license() else evidence_dir / Path(source_path)
+        if role == "dependency-license":
+            return evidence_dir / "dependencies" / dependency / Path(source_path)
+        return evidence_dir / Path(source_path)
+
+    def record(role, source_path, destination, runtime, source, dependency=None):
+        entry = {
+            "role": role,
+            "path": destination.relative_to(target_path.parent).as_posix(),
+            "digest": file_digest(destination),
+            "source_path": source_path,
+            "runtime": runtime,
+            "source": source,
+        }
+        if dependency is not None:
+            entry["dependency"] = dependency
+        files.append(entry)
 
     for runtime, result in sorted((runtime_results or {}).items()):
         evidence = (result or {}).get("evidence") or {}
@@ -138,13 +230,11 @@ def collect_license_evidence(recipe, target_path, runtime_results=None):
         for item in evidence.get("license_files") or []:
             role = item.get("role")
             source_path = item.get("source_path")
-            if any(
-                existing["role"] == role
-                and existing["source_path"] == source_path
-                for existing in files
-            ):
+            if recorded(role, source_path):
                 continue
             if role == "license" and source_path not in license_paths:
+                continue
+            if role == "license" and not declared_files and has_license():
                 continue
             if role == "source-header" and source_path not in header_paths:
                 continue
@@ -158,26 +248,10 @@ def collect_license_evidence(recipe, target_path, runtime_results=None):
                 or file_digest(source_file) != item.get("digest")
             ):
                 continue
-            if role == "license":
-                destination = target_path
-            else:
-                destination = (
-                    target_path.parent
-                    / "license-evidence"
-                    / Path(source_path)
-                )
+            destination = destination_for(role, source_path)
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source_file, destination)
-            files.append(
-                {
-                    "role": role,
-                    "path": destination.relative_to(target_path.parent).as_posix(),
-                    "digest": file_digest(destination),
-                    "source_path": source_path,
-                    "runtime": runtime,
-                    "source": item.get("source"),
-                }
-            )
+            record(role, source_path, destination, runtime, item.get("source"))
 
         source_dir = (result or {}).get("source_dir")
         if source_dir:
@@ -190,11 +264,11 @@ def collect_license_evidence(recipe, target_path, runtime_results=None):
                 ("source-header", header_paths),
             )
             for role, candidates in requested:
-                if role == "license" and any(
-                    item["role"] == "license" for item in files
-                ):
-                    continue
                 for relative in candidates:
+                    if recorded(role, relative):
+                        continue
+                    if role == "license" and not declared_files and has_license():
+                        break
                     content = source_file_content(
                         source_root,
                         relative,
@@ -202,42 +276,55 @@ def collect_license_evidence(recipe, target_path, runtime_results=None):
                     )
                     if content is None:
                         continue
-                    destination = (
-                        target_path
-                        if role == "license"
-                        else target_path.parent / "license-evidence" / relative
-                    )
+                    destination = destination_for(role, relative)
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     destination.write_bytes(content)
-                    files.append(
-                        {
-                            "role": role,
-                            "path": destination.relative_to(
-                                target_path.parent
-                            ).as_posix(),
-                            "digest": file_digest(destination),
-                            "source_path": relative,
-                            "runtime": runtime,
-                            "source": source_identity,
-                        }
-                    )
-                    if role == "license":
-                        break
+                    record(role, relative, destination, runtime, source_identity)
 
-    if not any(item["role"] == "license" for item in files) and config.get("url"):
+            for dependency in evidence.get("dependencies") or []:
+                if not dependency.get("declared"):
+                    continue
+                name = dependency["name"]
+                checkout = safe_child_path(
+                    source_root, dependency["path"], "build dependency path"
+                )
+                for relative in (dependency.get("license") or {}).get("files") or []:
+                    if recorded("dependency-license", relative, name):
+                        continue
+                    content = source_file_content(
+                        checkout, relative, dependency.get("source")
+                    )
+                    if content is None:
+                        continue
+                    destination = destination_for("dependency-license", relative, name)
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination.write_bytes(content)
+                    record(
+                        "dependency-license",
+                        relative,
+                        destination,
+                        runtime,
+                        dependency.get("source"),
+                        dependency=name,
+                    )
+
+    if not has_license() and config.get("url"):
         files.append(download_declared_license(config, target_path))
 
     missing = {}
-    has_license_file = any(item["role"] == "license" for item in files)
-    if not has_license_file:
+    has_license_file = has_license()
+    if declared_files:
+        missing_licenses = [
+            path for path in declared_files if not recorded("license", path)
+        ]
+        if missing_licenses and not (config.get("url") and has_license_file):
+            missing["license"] = missing_licenses
+    elif not has_license_file:
         missing["license"] = license_paths
     missing_headers = [
         path
         for path in header_paths
-        if not any(
-            item["role"] == "source-header" and item["source_path"] == path
-            for item in files
-        )
+        if not recorded("source-header", path)
     ]
     if missing_headers:
         missing["source-header"] = missing_headers
@@ -250,6 +337,16 @@ def collect_license_evidence(recipe, target_path, runtime_results=None):
         # A hash-pinned single-file source may carry its declared license notice
         # in the declared source header instead of shipping a separate license file.
         missing.pop("license", None)
+    built = set(runtime_results or {})
+    missing_dependency_licenses = [
+        f"{item['name']}:{relative}"
+        for item in declared_dependencies
+        if built & set(item.get("runtimes") or ("wasm", "native"))
+        for relative in (item.get("license") or {}).get("files") or []
+        if not recorded("dependency-license", relative, item["name"])
+    ]
+    if missing_dependency_licenses:
+        missing["dependency-license"] = missing_dependency_licenses
     return {
         "spdx": config.get("spdx"),
         "verified": bool(files) and not missing,
