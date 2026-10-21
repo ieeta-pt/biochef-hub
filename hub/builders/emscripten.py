@@ -6,6 +6,7 @@ from pathlib import Path
 
 from builders.bundle_evidence import (
     collect_declared_dependencies,
+    combine_dependencies,
     collect_git_dependencies,
     command_output,
     emsdk_commit,
@@ -152,8 +153,9 @@ def build(tool_name, recipe_dir, emscripten_settings, source, output_dir="build"
             tag=tag,
             commit=commit,
         )
-        evidence["dependencies"] = collect_git_dependencies(source_dir) + collect_declared_dependencies(
-            source_dir, dependencies, "wasm"
+        evidence["dependencies"] = combine_dependencies(
+            collect_git_dependencies(source_dir),
+            collect_declared_dependencies(source_dir, dependencies, "wasm"),
         )
         evidence["scripts"] = [
             {

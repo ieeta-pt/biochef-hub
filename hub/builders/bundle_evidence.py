@@ -129,6 +129,24 @@ def collect_git_dependencies(source_dir, prefix=""):
     return dependencies
 
 
+def combine_dependencies(submodules, declared):
+    """Submodules, less those a declared dependency covers, then the declared ones.
+
+    A declared dependency at a submodule's path records that submodule, with
+    its licence, and its own submodules under it, so they are not listed twice.
+    """
+    covered = [item["path"].rstrip("/") for item in declared if item.get("declared")]
+    kept = [
+        item
+        for item in submodules
+        if not any(
+            item["path"] == path or item["path"].startswith(f"{path}/")
+            for path in covered
+        )
+    ]
+    return kept + declared
+
+
 def normalize_git_url(value):
     return (value or "").strip().rstrip("/").removesuffix(".git").lower()
 

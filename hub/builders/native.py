@@ -9,6 +9,7 @@ import requests
 
 from builders.bundle_evidence import (
     collect_declared_dependencies,
+    combine_dependencies,
     collect_git_dependencies,
     command_output,
     file_digest,
@@ -194,8 +195,9 @@ def build(tool_name, recipe_dir, settings, source, output_dir="build", dependenc
             )["actual"]
             submodules = collect_git_dependencies(source_dir)
         evidence["source"]["actual"] = actual_source
-        evidence["dependencies"] = submodules + collect_declared_dependencies(
-            source_dir, dependencies, "native"
+        evidence["dependencies"] = combine_dependencies(
+            submodules,
+            collect_declared_dependencies(source_dir, dependencies, "native"),
         )
         return {
             "output_dir": str(destination),
