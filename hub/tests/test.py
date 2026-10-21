@@ -8,7 +8,7 @@ from pathlib import Path
 import random
 import string
 
-from utils.data_types import detect_data_type, detect_binary_type, BINARY_VALIDATORS
+from utils.data_types import detect_data_type, detect_binary_type, bgzf_inflate, BINARY_VALIDATORS
 from utils.type_definitions import get_example_inputs, is_binary_type
 
 seed = random.randint(0, 10_000)
@@ -325,6 +325,12 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
                     binary_types = [t for t in output_def["types"] if is_binary_type(t)]
                     if binary_types:
                         data = matched.read_bytes()
+                        # A BGZF file with nothing inside, the end-of-file block
+                        # a tool writes before it fails, is as empty as a text
+                        # output with nothing in it.
+                        if not data or bgzf_inflate(data) == (b"", True):
+                            print(f"[WARNING] Empty output ({output_name}, {tool_bundle['name']}, {cmd})")
+                            continue
                         detected = detect_binary_type(data, binary_types)
                         if detected in binary_types:
                             continue
@@ -332,9 +338,6 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
                             print(f"[INFO] Binary output found ({output_name}); format not checked")
                             continue
                         if len(binary_types) == len(output_def["types"]):
-                            if not data:
-                                print(f"[WARNING] Empty output ({output_name}, {tool_bundle['name']}, {cmd})")
-                                continue
                             print(f"[ERROR] Unexpected output type ({output_name}, {tool_bundle['name']}, {cmd})")
                             print(f"  Detected : {detected or 'UNKNOWN'}")
                             print(f"  Expected : {output_def['types']}")
