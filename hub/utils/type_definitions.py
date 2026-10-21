@@ -118,6 +118,12 @@ TYPE_DEFINITIONS = [
         ),
     },
     {
+        "id": "VCF_HEADER",
+        "input": True,
+        "output": True,
+        "example": "##INFO=<ID=TAG,Number=1,Type=Integer,Description=\"An added tag\">",
+    },
+    {
         "id": "VCF_GZ",
         "input": True,
         "output": True,
@@ -210,6 +216,12 @@ TYPE_DEFINITIONS = [
         "example_file": "example.bcf.csi",
     },
     {
+        "id": "CHROM_SIZES",
+        "input": True,
+        "output": True,
+        "example": "seq\t98",
+    },
+    {
         "id": "FAI",
         "input": True,
         "output": True,
@@ -254,7 +266,7 @@ TYPE_DEFINITIONS = [
         "id": "BED",
         "input": True,
         "output": True,
-        "example": "seq\t0\t10\nseq1\t0\t20",
+        "example": "seq\t0\t10\nseq\t40\t60",
     },
     {
         "id": "CLUSTAL",
