@@ -198,6 +198,13 @@ TYPE_DEFINITIONS = [
         "example_file": "example.fmd",
     },
     {
+        "id": "YAK",
+        "input": True,
+        "output": True,
+        "kind": "binary",
+        "example_file": "example.yak",
+    },
+    {
         # A bwa index: a tar of ref.amb, ref.ann, ref.bwt, ref.pac and
         # ref.sa, the files bwa index writes for a prefix, and ref.alt when
         # some sequences are alternate contigs.
