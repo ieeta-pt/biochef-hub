@@ -262,6 +262,19 @@ TYPE_DEFINITIONS = [
             "((A:0.3,C:0.3)90:0.4,(B:0.3,D:0.3)90:0.4);"
         ),
     },
+    {
+        # An alignment of coding sequences in whole codons, as HyPhy's
+        # selection analyses read it; its names are the NEWICK example's
+        "id": "CODON_ALIGNMENT",
+        "input": True,
+        "output": False,
+        "example": (
+            ">A\nATGAAACCCGGGTTTACAGATCTGCATGGCACGTCAAAGCTTGAGTCTCCTGCAGTACTGATAGCAGCTCGAGCACCT\n"
+            ">B\nATGAAGCCCGGATTTACCGATCTGCACGGCACGTCGAAGCTTGAATCTCCTGCGGTACTGATTGCAGCTCGGGCACCT\n"
+            ">C\nATGAAACCAGGGTTCACAGACCTGCATGGTACGTCAAAACTCGAGTCCCCTGCAGTGCTGATAGCCGCTCGAGCTCCT\n"
+            ">D\nATGAGACCCGGGTTTACGGATCTCCATGGCACATCAAAGCTGGAGTCTCCAGCAGTACTCATAGCAGCACGAGCACCA"
+        ),
+    },
 ]
 
 
