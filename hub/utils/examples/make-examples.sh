@@ -3,8 +3,9 @@
 # type_definitions.py, so every binary example describes the same data:
 # the 98 bp sequence "seq", its two paired reads and its one variant.
 #
-# Needs samtools, bcftools, minimap2, ropebwt3, hisat2-build, bedToBigBed and
-# bedGraphToBigWig on PATH. Run from anywhere; writes next to this script.
+# Needs samtools, bcftools, minimap2, ropebwt3, yak, hisat2-build,
+# bedToBigBed and bedGraphToBigWig on PATH. Run from anywhere; writes
+# next to this script.
 set -euo pipefail
 
 out=$(cd "$(dirname "$0")" && pwd)
@@ -36,6 +37,7 @@ bcftools view --no-version -Ob -o calls.bcf calls.vcf
 bcftools index -c -o calls.bcf.csi calls.bcf
 minimap2 -d ref.mmi ref.fa
 ropebwt3 build -d -o ref.fmd ref.fa
+yak count -o ref.yak ref.fa
 # Prefix tables of 4 bases keep the index at 20 kB; the default ones take 4 MB
 hisat2-build -q -t 4 --localftabchars 4 --ss ref.ss --exon ref.exon --snp ref.snp --haplotype ref.haplotype ref.fa ref
 # The index files in one tar, owned by nobody and dated 0, as BioChef's
@@ -59,6 +61,7 @@ cp calls.bcf "$out/example.bcf"
 cp calls.bcf.csi "$out/example.bcf.csi"
 cp ref.mmi "$out/example.mmi"
 cp ref.fmd "$out/example.fmd"
+cp ref.yak "$out/example.yak"
 cp ref.ht2 "$out/example.ht2"
 cp peaks.bb "$out/example.bb"
 cp cov.bw "$out/example.bw"
