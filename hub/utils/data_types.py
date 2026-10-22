@@ -331,6 +331,28 @@ def validate_fai(content):
 
     return True
 
+def validate_svg(content):
+    """One or more SVG documents, each optionally after an XML declaration, a
+    DOCTYPE and comments. nw_display, for one, writes one per tree."""
+    rest = content.strip()
+    if not rest:
+        return False
+    prolog = re.compile(r'(<\?xml[^>]*\?>|<!DOCTYPE[^>]*>|<!--.*?-->|\s+)*', re.S | re.I)
+    while rest:
+        rest = rest[prolog.match(rest).end():]
+        if not re.match(r'<svg[\s>]', rest):
+            return False
+        end = rest.find('</svg>')
+        if end < 0:
+            return False
+        # a nested <svg> is closed before its parent
+        while rest.count('<svg', 0, end) > rest.count('</svg>', 0, end) + 1:
+            end = rest.find('</svg>', end + 6)
+            if end < 0:
+                return False
+        rest = rest[end + 6:].strip()
+    return True
+
 def validate_newick(content):
     """Check ordinary Newick syntax, including multiple trees and comments."""
 
@@ -409,6 +431,7 @@ ALL_TYPES = [
     {'type': 'VCF', 'validator': validate_vcf},
     {'type': 'SAM', 'validator': validate_sam},
     {'type': 'BED', 'validator': validate_bed},
+    {'type': 'SVG', 'validator': validate_svg},
     {'type': 'LIST', 'validator': validate_list},
     {'type': 'GFF', 'validator': validate_gff},
     {'type': 'GTF', 'validator': validate_gtf},
