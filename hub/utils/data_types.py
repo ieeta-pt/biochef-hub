@@ -280,6 +280,89 @@ def validate_clustal(content):
         has_sequence = True
     return has_sequence
 
+def _tab_rows(content, columns):
+    """The lines of a tab-separated table, split, when each has the given
+    number of fields, none empty. Lines that start with # are comments."""
+    if not isinstance(content, str) or not content.strip():
+        return None
+    rows = []
+    for line in content.strip().split('\n'):
+        line = line.rstrip('\r')
+        if not line or line.startswith('#'):
+            continue
+        fields = line.split('\t')
+        if len(fields) != columns or not all(f.strip() for f in fields):
+            return None
+        rows.append(fields)
+    return rows or None
+
+def _dmp_rows(content):
+    """The lines of an NCBI .dmp file, split at | and stripped, without the
+    empty field after the last |"""
+    if not isinstance(content, str) or not content.strip():
+        return None
+    rows = []
+    for line in content.strip().split('\n'):
+        line = line.rstrip('\r')
+        if not line or line.startswith('#'):
+            continue
+        fields = [f.strip() for f in line.split('|')]
+        if len(fields) > 1 and fields[-1] == '':
+            fields.pop()
+        rows.append(fields)
+    return rows or None
+
+def validate_taxid_map(content):
+    """A sequence ID and a taxonomic ID per line"""
+    rows = _tab_rows(content, 2)
+    return bool(rows) and all(re.fullmatch(r'\S+', s) and re.fullmatch(r'\d+', t) for s, t in rows)
+
+def validate_ncbi_nodes(content):
+    """nodes.dmp: a taxonomic ID, its parent and its rank, then any others"""
+    rows = _dmp_rows(content)
+    return bool(rows) and all(len(r) >= 3 and r[0].isdigit() and r[1].isdigit() and r[2] for r in rows)
+
+def validate_ncbi_names(content):
+    """names.dmp: a taxonomic ID, a name, a unique form of it, a class"""
+    rows = _dmp_rows(content)
+    return bool(rows) and all(len(r) == 4 and r[0].isdigit() and r[1] and r[3] for r in rows)
+
+def validate_taxid_names(content):
+    """A taxonomic ID and a name per line"""
+    rows = _tab_rows(content, 2)
+    return bool(rows) and all(t.isdigit() for t, _ in rows)
+
+def validate_taxid_sizes(content):
+    """A taxonomic ID and a genome size per line"""
+    rows = _tab_rows(content, 2)
+    return bool(rows) and all(t.isdigit() and n.isdigit() for t, n in rows)
+
+CENTRIFUGE_COLUMNS = {'readID', 'seqID', 'taxID', 'taxLevel', 'taxRank', 'taxName', 'score', '2ndBestScore',
+                      'hitLength', 'queryLength', 'numMatches', 'readSeq', 'readQual'}
+
+def validate_centrifuge_classification(content):
+    """A header of Centrifuge's columns, then lines with as many fields"""
+    if not isinstance(content, str) or not content.strip():
+        return False
+    lines = [line.rstrip('\r') for line in content.strip('\n').split('\n')]
+    header = lines[0].split('\t')
+    return set(header) <= CENTRIFUGE_COLUMNS and all(len(line.split('\t')) == len(header) for line in lines[1:])
+
+def validate_centrifuge_report(content):
+    """name, taxID, taxRank, genomeSize, numReads, numUniqueReads, abundance"""
+    if not isinstance(content, str) or not content.strip():
+        return False
+    lines = [line.rstrip('\r') for line in content.strip('\n').split('\n')]
+    if lines[0] != 'name\ttaxID\ttaxRank\tgenomeSize\tnumReads\tnumUniqueReads\tabundance':
+        return False
+    for line in lines[1:]:
+        f = line.split('\t')
+        if len(f) != 7 or not all(x.isdigit() for x in f[1:2] + f[3:6]):
+            return False
+        if not re.fullmatch(r'[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?', f[6]):
+            return False
+    return True
+
 def validate_snd(content):
     # bhtsne's SND table: optional '#' header, then one row per sample,
     # a name followed by tab-separated numbers, every row the same width
@@ -414,6 +497,13 @@ ALL_TYPES = [
     {'type': 'GTF', 'validator': validate_gtf},
     {'type': 'PAF', 'validator': validate_paf},
     {'type': 'GFA', 'validator': validate_gfa},
+    {'type': 'TAXID_MAP', 'validator': validate_taxid_map},
+    {'type': 'NCBI_NODES', 'validator': validate_ncbi_nodes},
+    {'type': 'NCBI_NAMES', 'validator': validate_ncbi_names},
+    {'type': 'TAXID_NAMES', 'validator': validate_taxid_names},
+    {'type': 'TAXID_SIZES', 'validator': validate_taxid_sizes},
+    {'type': 'CENTRIFUGE_CLASSIFICATION', 'validator': validate_centrifuge_classification},
+    {'type': 'CENTRIFUGE_REPORT', 'validator': validate_centrifuge_report},
     {'type': 'JSON', 'validator': validate_json},
     {'type': 'CLUSTAL', 'validator': validate_clustal},
     {'type': 'SND', 'validator': validate_snd},
