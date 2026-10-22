@@ -262,6 +262,22 @@ TYPE_DEFINITIONS = [
             "((A:0.3,C:0.3)90:0.4,(B:0.3,D:0.3)90:0.4);"
         ),
     },
+    {
+        # GeneFuse's fusion file: the genes it looks for fusions between,
+        # each with its place in the reference and its exons; GENE_B is on
+        # the reverse strand
+        "id": "GENEFUSE_CSV",
+        "input": True,
+        "output": False,
+        "example": (
+            ">GENE_A,seq:1-49\n"
+            "1,1,20\n"
+            "2,30,49\n"
+            ">GENE_B,seq:50-98\n"
+            "1,80,98\n"
+            "2,51,70"
+        ),
+    },
 ]
 
 
