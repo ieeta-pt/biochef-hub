@@ -30,6 +30,20 @@ Meaning:
 - `validator`: the detector name used in `data_types.py`.
 - `example`: sample input for that type.
 
+A binary type (`"kind": "binary"`) cannot carry its example as a string. Put the file in `hub/utils/examples/` and name it with `example_file` instead of `example`:
+
+```python
+{
+    "id": "NewBinaryType",
+    "input": True,
+    "output": True,
+    "kind": "binary",
+    "example_file": "example.newbin",
+},
+```
+
+Make it from the text examples, so that every example describes the same data, and add the command to `hub/utils/examples/make-examples.sh`.
+
 
 ## Add The Hub Detector
 

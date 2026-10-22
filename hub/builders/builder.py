@@ -1,62 +1,21 @@
 import json
 from pathlib import Path
-from urllib.parse import urlparse
 import yaml
 import os
 import shutil
-import hashlib
-import requests
 import stat
+import copy
 
 from builders.biowasm import build as build_biowasm
 from builders.emscripten import build as build_emscripten
 from builders.native import build as build_native
-from builders.r import build as build_r
-
-# Produced once per recipe by the R strategy and shared by all of its
-# operations: the package library as an Emscripten filesystem image, and the
-# index webR needs to read it.
-R_LIBRARY_ARTIFACTS = ("library.data.gz", "library.js.metadata")
+from builders.bundle_evidence import build_bundle_evidence, collect_license_evidence, license_candidates
+from builders.container import file_digest, safe_segment
 
 def reset_dir(dir_to_reset):
     if os.path.exists(dir_to_reset):
         shutil.rmtree(dir_to_reset)
     os.makedirs(dir_to_reset, exist_ok=True)
-
-def generate_digest(file_path: str) -> str:
-    sha256_hash = hashlib.sha256()
-
-    with open(file_path, "rb") as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            sha256_hash.update(chunk)
-
-    return f"sha256:{sha256_hash.hexdigest()}"
-
-def download_github_license(repo_url: str, target_path: str, license_files=None):
-    parts = urlparse(repo_url).path.strip("/").split("/")
-    if len(parts) < 2:
-        raise ValueError("Invalid GitHub repo URL")
-    owner, repo = parts[0], parts[1]
-
-    # Try recipe-declared filenames first, then common fallbacks.
-    candidates = list(license_files or []) + ["LICENSE", "LICENSE.txt", "LICENSE.md", "COPYING", "COPYING.txt"]
-    seen = set()
-    candidates = [c for c in candidates if not (c in seen or seen.add(c))]
-
-    last_error = None
-    for branch in ["main", "master"]:
-        for filename in candidates:
-            raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{filename}"
-            response = requests.get(raw_url)
-            if response.status_code == 200:
-                target_file = Path(target_path)
-                target_file.parent.mkdir(parents=True, exist_ok=True)
-                target_file.write_text(response.text, encoding="utf-8")
-                return
-            else:
-                last_error = response.status_code
-
-    raise Exception(f"Failed to fetch license (tried {candidates}): {last_error}")
 
 def build_wasm(recipe, recipe_dir, build_dir):
     tool_name = recipe["name"]
@@ -66,33 +25,53 @@ def build_wasm(recipe, recipe_dir, build_dir):
     def build_biowasm_wrapper():
         package_name = wasm_settings.get("biowasm",{}).get("package", "")
         if not package_name: package_name = tool_name
-        return build_biowasm(package_name, recipe["source"].get("version"), output_dir=build_dir)
+        package_name = safe_segment(package_name, "BioWASM package name")
+        license_config = recipe.get("license") or {}
+        return build_biowasm(
+            package_name,
+            recipe["source"].get("version"),
+            output_dir=build_dir,
+            declared_source=recipe.get("source"),
+            license_files=license_candidates(license_config.get("files")),
+            evidence_files=license_config.get("evidence_files") or [],
+        )
 
     def build_emscripten_wrapper():
+        source_repo = recipe.get("source", {}).get("repo")
+        if not source_repo:
+            raise RuntimeError("Emscripten builds require source.repo + source.commit")
         source = (
-            recipe["source"]["repo"],
+            source_repo,
             recipe["source"].get("tag"),
             recipe["source"].get("commit") 
         )
-        return build_emscripten(tool_name, recipe_dir, wasm_settings["emscripten"], source, output_dir=build_dir)
+        return build_emscripten(
+            tool_name,
+            recipe_dir,
+            wasm_settings["emscripten"],
+            source,
+            output_dir=build_dir,
+        )
 
     output_dir = None
+    result = None
     if wasm_strategy == "biowasm":
-        output_dir = build_biowasm_wrapper()
+        result = build_biowasm_wrapper()
+        output_dir = result["output_dir"]
     elif wasm_strategy == "emscripten":
-        output_dir = build_emscripten_wrapper()
-    elif wasm_strategy == "r":
-        # No source checkout: the packages are named in the recipe and come
-        # from CRAN, so there is nothing to clone and no source tuple to pass.
-        output_dir = build_r(tool_name, wasm_settings["r"], output_dir=build_dir)
+        result = build_emscripten_wrapper()
+        output_dir = result["output_dir"]
     elif wasm_strategy == "auto":
-        output_dir = build_biowasm_wrapper()
-        if not output_dir: output_dir = build_emscripten_wrapper()
+        result = build_biowasm_wrapper()
+        output_dir = result["output_dir"]
+        if not output_dir:
+            result = build_emscripten_wrapper()
+            output_dir = result["output_dir"]
 
     if not output_dir:
         raise RuntimeError("Failed to build WASM using selected strategy")
 
-    return output_dir
+    return result
 
 def build_plugins(file_paths, build_dir, registry_dir):
     print(f"Building recipes: {file_paths}")
@@ -102,7 +81,6 @@ def build_plugins(file_paths, build_dir, registry_dir):
 
     for path in file_paths:
         path = Path(path).resolve()
-
         with open(path, 'r') as file:
             recipe = yaml.safe_load(file)
 
@@ -110,100 +88,114 @@ def build_plugins(file_paths, build_dir, registry_dir):
         reset_dir(build_dir)
 
         outputs = {}
-        # The R strategy produces a different set of artifacts from the C ones,
-        # so the per-operation copying below has to know which was used.
-        wasm_strategy = recipe['build'].get('wasm', {}).get('strategy')
         build_runtimes = recipe['build'].keys()
+        recipe_dir = path.parent
         for runtime in build_runtimes:
             if runtime == "wasm":
-                recipe_dir = path.parent
                 outputs["wasm"] = build_wasm(recipe, recipe_dir, build_dir)
             elif runtime == "native":
-                source = (
-                    recipe["source"]["repo"],
-                    recipe["source"].get("tag"),
-                    recipe["source"].get("commit")
-                )
                 outputs["native"] = build_native(
-                    recipe["name"],
+                    recipe["id"],
+                    recipe_dir,
                     recipe['build']["native"],
-                    source,
+                    recipe["source"],
                     output_dir=build_dir
                 )
 
+        for runtime in build_runtimes:
+            result = outputs.get(runtime)
+            output_dir = result.get("output_dir") if isinstance(result, dict) else None
+            if not output_dir:
+                error = ((result or {}).get("evidence") or {}).get("error") if isinstance(result, dict) else None
+                detail = f": {error}" if error else ""
+                raise RuntimeError(f"Failed to build declared {runtime} runtime for {recipe['name']}{detail}")
+
+        recipe_version = safe_segment(recipe["version"], "recipe version")
         for operation in recipe["operations"]:
-            plugin_dir = f"{registry_dir}/{operation['id']}/{recipe['version']}"
+            operation_id = safe_segment(operation["id"], "operation id")
+            plugin_dir = Path(registry_dir) / operation_id / recipe_version
             os.makedirs(plugin_dir, exist_ok=True)
 
-            bundle = operation
+            bundle = copy.deepcopy(operation)
+            bundle["version"] = recipe_version
             bundle["runtime"] = {
                 "modes": recipe["runtime"]["modes"],
             }
+            runtime_artifacts = {}
 
-            if "github" in recipe['source']["repo"]:
-                license_files = recipe.get("license", {}).get("files")
-                download_github_license(recipe["source"]["repo"], f"{plugin_dir}/LICENSE", license_files)
+            license_evidence = collect_license_evidence(recipe, plugin_dir / "LICENSE", runtime_results=outputs)
 
             for runtime in build_runtimes:
-                runtime_dir = f"{plugin_dir}/runtime/{runtime}"
+                runtime_dir = plugin_dir / "runtime" / runtime
                 os.makedirs(runtime_dir, exist_ok=True)
 
                 # TODO deal with shared binaries
-                bin_name = operation["bin"]
-                output_dir = outputs[runtime]
-                if not output_dir: continue
+                bin_name = safe_segment(operation["bin"], "operation binary name")
+                output_dir = outputs[runtime]["output_dir"]
+                output_path = Path(output_dir)
 
-                if runtime == "wasm" and wasm_strategy == "r":
-                    # An R operation has no compiled binary of its own. What it
-                    # needs is the package library, which every operation in the
-                    # recipe shares, and the script naming it in `bin`, which is
-                    # shipped with the recipe rather than produced by the build.
-                    for artifact in R_LIBRARY_ARTIFACTS:
-                        shutil.copyfile(f"{output_dir}/{artifact}", f"{runtime_dir}/{artifact}")
-
-                    script_source = Path(path).parent / bin_name
-                    if not script_source.is_file():
-                        raise FileNotFoundError(
-                            f"{recipe['name']}: operation '{operation['id']}' names the script "
-                            f"'{bin_name}', which is not in the recipe directory {script_source.parent}"
-                        )
-                    shutil.copyfile(script_source, f"{runtime_dir}/{bin_name}")
-                elif runtime == "wasm":
-                    shutil.copyfile(f"{output_dir}/{bin_name}.js", f"{runtime_dir}/{bin_name}.js")
-                    shutil.copyfile(f"{output_dir}/{bin_name}.wasm", f"{runtime_dir}/{bin_name}.wasm")
+                if runtime == "wasm":
+                    wasm_outputs = []
+                    extensions = ["js", "wasm"]
+                    data_artifact = output_path / f"{bin_name}.data"
+                    if data_artifact.exists() or data_artifact.is_symlink():
+                        extensions.append("data")
+                    for extension in extensions:
+                        source_artifact = output_path / f"{bin_name}.{extension}"
+                        if not source_artifact.is_file() or source_artifact.is_symlink():
+                            raise RuntimeError(f"WASM build output is missing or unsafe: {source_artifact}")
+                        target_artifact = runtime_dir / source_artifact.name
+                        shutil.copyfile(source_artifact, target_artifact)
+                        wasm_outputs.append((extension, target_artifact))
                 elif runtime == "native":
-                    shutil.copyfile(f"{output_dir}/{bin_name}", f"{runtime_dir}/{bin_name}")
-                    st = os.stat(f"{runtime_dir}/{bin_name}")
-                    os.chmod(f"{runtime_dir}/{bin_name}", st.st_mode | stat.S_IEXEC)
+                    source_artifact = output_path / bin_name
+                    if not source_artifact.is_file() or source_artifact.is_symlink():
+                        raise RuntimeError(f"Native build output is missing or unsafe: {source_artifact}")
+                    native_artifact = runtime_dir / bin_name
+                    shutil.copyfile(source_artifact, native_artifact)
+                    st = os.stat(native_artifact)
+                    os.chmod(native_artifact, st.st_mode | stat.S_IEXEC)
 
-                if runtime == "wasm" and wasm_strategy == "r":
-                    bundle["runtime"]["r"] = {
-                        "library_digest": generate_digest(f"{runtime_dir}/library.data.gz"),
-                        "metadata_digest": generate_digest(f"{runtime_dir}/library.js.metadata"),
-                        "script_digest": generate_digest(f"{runtime_dir}/{bin_name}"),
-                        # Recorded so the runtime can refuse a library built
-                        # against a different webR. These binaries are only
-                        # loadable by the release they were compiled for, and
-                        # without this the mismatch surfaces as an unattributable
-                        # error inside a worker.
-                        "webr_version": recipe['build']['wasm']['r']['webrVersion'],
-                    }
-
-                elif runtime == "wasm":
-                    bundle["runtime"]["wasm"] = {
-                        "wasm_digest": generate_digest(f"{runtime_dir}/{bin_name}.wasm"),
-                        "js_digest":generate_digest(f"{runtime_dir}/{bin_name}.js"),
+                if runtime == "wasm":
+                    wasm_files = []
+                    wasm_metadata = {}
+                    for extension, artifact_path in wasm_outputs:
+                        relative_path = f"runtime/wasm/{artifact_path.name}"
+                        digest = file_digest(artifact_path)
+                        wasm_metadata[f"{extension}_digest"] = digest
+                        wasm_files.append({"path": relative_path, "digest": digest})
+                    wasm_metadata["files"] = wasm_files
+                    bundle["runtime"]["wasm"] = wasm_metadata
+                    runtime_artifacts["wasm"] = {
+                        "files": wasm_files
                     }
 
                 elif runtime == "native":
                     bundle["runtime"]["native"] = {
-                        "digest": generate_digest(f"{runtime_dir}/{bin_name}"),
+                        "digest": file_digest(runtime_dir / bin_name),
+                    }
+                    runtime_artifacts["native"] = {
+                        "files": [
+                            {
+                                "path": f"runtime/native/{bin_name}",
+                                "digest": bundle["runtime"]["native"]["digest"],
+                            }
+                        ]
                     }
 
-            with open(f"{plugin_dir}/bundle.json", "w") as f:
+            with open(plugin_dir / "bundle.json", "w") as f:
                 json.dump(bundle, f, indent=4)
-            
-            #TODO sbom.json
+
+            build_evidence = build_bundle_evidence(
+                recipe_path=path,
+                recipe=recipe,
+                operation=operation,
+                runtime_results=outputs,
+                runtime_artifacts=runtime_artifacts,
+                license_evidence=license_evidence,
+            )
+            with open(plugin_dir / "build-evidence.json", "w") as f:
+                json.dump(build_evidence, f, indent=4, sort_keys=True)
 
         print(f"Finished building {recipe["name"]}")
 
