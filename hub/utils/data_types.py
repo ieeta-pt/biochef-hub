@@ -301,6 +301,56 @@ def validate_snd(content):
                 return False
     return width is not None
 
+def _kraken2_lines(content):
+    """The lines of a tab-separated Kraken 2 file, split"""
+    if not isinstance(content, str) or not content.strip():
+        return None
+    return [line.rstrip('\r').split('\t') for line in content.strip('\n').split('\n')]
+
+def validate_kraken2_output(content):
+    """classify's line per read: C or U, ID, taxon (an ID, or a name with
+    the ID), length (or both lengths of a pair), and the k-mer taxa"""
+    rows = _kraken2_lines(content)
+    return bool(rows) and all(
+        len(f) == 5 and f[0] in ('C', 'U') and f[1]
+        and re.fullmatch(r'\d+|.+ \(taxid \d+\)', f[2]) and re.fullmatch(r'\d+(\|\d+)?', f[3])
+        for f in rows)
+
+def validate_kraken2_report(content):
+    """Per taxon: percentage, reads in its clade, reads assigned to it, (with
+    -K its minimizers and distinct minimizers,) rank code, ID, name"""
+    rows = _kraken2_lines(content)
+    if not rows:
+        return False
+    for f in rows:
+        if len(f) not in (6, 8):
+            return False
+        counts, rank, taxid = f[1:len(f) - 3], f[-3], f[-2]
+        if not re.fullmatch(r'\s*\d+(\.\d+)?', f[0]) or not all(c.isdigit() for c in counts):
+            return False
+        if not re.fullmatch(r'[URDKPCOFGS]\d*|-', rank) or not taxid.isdigit():
+            return False
+    return True
+
+def validate_kraken2_mpa_report(content):
+    """Per taxon: its path through the ranks, as d__Bacteria|g__Escherichia,
+    and its reads"""
+    rows = _kraken2_lines(content)
+    return bool(rows) and all(
+        len(f) == 2 and re.fullmatch(r'[a-z]__[^|\t]+(\|[a-z]__[^|\t]+)*', f[0]) and f[1].isdigit()
+        for f in rows)
+
+def validate_seqid_accessions(content):
+    """A sequence ID and an accession number per line"""
+    rows = _kraken2_lines(content)
+    return bool(rows) and all(len(f) == 2 and all(re.fullmatch(r'\S+', x) for x in f) for f in rows)
+
+def validate_ncbi_accession2taxid(content):
+    """A header, then accession, accession.version, taxid and gi per line"""
+    rows = _kraken2_lines(content)
+    return bool(rows) and rows[0] == ['accession', 'accession.version', 'taxid', 'gi'] and all(
+        len(f) == 4 and f[0] and f[1] and f[2].isdigit() for f in rows[1:])
+
 def validate_json(content):
     if not content or not content.strip():
         return False
@@ -416,6 +466,11 @@ ALL_TYPES = [
     {'type': 'GFA', 'validator': validate_gfa},
     {'type': 'JSON', 'validator': validate_json},
     {'type': 'CLUSTAL', 'validator': validate_clustal},
+    {'type': 'KRAKEN2_OUTPUT', 'validator': validate_kraken2_output},
+    {'type': 'KRAKEN2_REPORT', 'validator': validate_kraken2_report},
+    {'type': 'KRAKEN2_MPA_REPORT', 'validator': validate_kraken2_mpa_report},
+    {'type': 'SEQID_ACCESSIONS', 'validator': validate_seqid_accessions},
+    {'type': 'NCBI_ACCESSION2TAXID', 'validator': validate_ncbi_accession2taxid},
     {'type': 'SND', 'validator': validate_snd},
     {'type': 'FAI', 'validator': validate_fai},
     {'type': 'NEWICK', 'validator': validate_newick},
