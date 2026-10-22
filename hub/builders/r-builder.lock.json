@@ -1,0 +1,6 @@
+{
+  "webr": {
+    "0.6.0": "ghcr.io/r-wasm/webr:v0.6.0@sha256:3fbf3dc3537c5b31bca94dd797dc25364693b18d71b1d0975f318fbfd6269d86"
+  },
+  "cran_snapshot_base": "https://packagemanager.posit.co/cran/"
+}

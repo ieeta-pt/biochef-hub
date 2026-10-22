@@ -9,8 +9,9 @@ import copy
 from builders.biowasm import build as build_biowasm
 from builders.emscripten import build as build_emscripten
 from builders.native import build as build_native
+from builders.r import LIBRARY_FILES as R_LIBRARY_FILES, build as build_r
 from builders.bundle_evidence import build_bundle_evidence, collect_license_evidence, license_candidates
-from builders.container import file_digest, safe_segment
+from builders.container import file_digest, safe_child_path, safe_segment
 
 def reset_dir(dir_to_reset):
     if os.path.exists(dir_to_reset):
@@ -60,6 +61,15 @@ def build_wasm(recipe, recipe_dir, build_dir):
         output_dir = result["output_dir"]
     elif wasm_strategy == "emscripten":
         result = build_emscripten_wrapper()
+        output_dir = result["output_dir"]
+    elif wasm_strategy == "r":
+        result = build_r(
+            tool_name,
+            recipe_dir,
+            wasm_settings["r"],
+            recipe.get("source") or {},
+            output_dir=build_dir,
+        )
         output_dir = result["output_dir"]
     elif wasm_strategy == "auto":
         result = build_biowasm_wrapper()
@@ -133,6 +143,34 @@ def build_plugins(file_paths, build_dir, registry_dir):
                 bin_name = safe_segment(operation["bin"], "operation binary name")
                 output_dir = outputs[runtime]["output_dir"]
                 output_path = Path(output_dir)
+
+                if runtime == "wasm" and recipe["build"]["wasm"]["strategy"] == "r":
+                    # An R operation has no compiled binary of its own: it runs
+                    # the script named in `bin`, which ships with the recipe,
+                    # against the package library every operation shares.
+                    r_sources = [(name, output_path / name) for name in R_LIBRARY_FILES]
+                    r_sources.append(
+                        ("script", safe_child_path(recipe_dir, bin_name, "operation script"))
+                    )
+                    r_keys = {
+                        "library.data.gz": "library_digest",
+                        "library.js.metadata": "metadata_digest",
+                        "script": "script_digest",
+                    }
+                    r_metadata = {"webr_version": recipe["build"]["wasm"]["r"]["webrVersion"]}
+                    r_files = []
+                    for key, source_artifact in r_sources:
+                        if not source_artifact.is_file() or source_artifact.is_symlink():
+                            raise RuntimeError(f"R build output is missing or unsafe: {source_artifact}")
+                        target_artifact = runtime_dir / source_artifact.name
+                        shutil.copyfile(source_artifact, target_artifact)
+                        digest = file_digest(target_artifact)
+                        r_metadata[r_keys[key]] = digest
+                        r_files.append({"path": f"runtime/wasm/{target_artifact.name}", "digest": digest})
+                    r_metadata["files"] = r_files
+                    bundle["runtime"]["r"] = r_metadata
+                    runtime_artifacts["wasm"] = {"files": r_files}
+                    continue
 
                 if runtime == "wasm":
                     wasm_outputs = []
