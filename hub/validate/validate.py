@@ -118,6 +118,10 @@ def builder_source_errors(recipe: dict) -> list[str]:
     wasm = build.get("wasm") or {}
     if wasm.get("strategy") == "emscripten" and not source.get("repo"):
         errors.append("Emscripten builds currently require source.repo + source.commit")
+    # An R package is built from its CRAN source tarball, so that what is built
+    # is the declared, hash-pinned file rather than a name resolved at build time.
+    if wasm.get("strategy") == "r" and not (source.get("url") and source.get("sha256")):
+        errors.append("R builds require source.url + source.sha256 (the package's CRAN source tarball)")
     return errors
 
 def validate_wasm_strategy(field, value, error):
@@ -254,17 +258,17 @@ schema = {
                     'r': {
                         'type': 'dict',
                         'schema': {
-                            # pkgdepends references, e.g. "ape" or
-                            # "ape@5.8.1". The first is the package an
-                            # operation script is expected to library().
-                            'packages': {
-                                'type': 'list',
-                                'schema': {'type': 'string'},
-                                'minlength': 1,
+                            # The package itself is the source tarball the
+                            # recipe declares. Its dependencies are resolved
+                            # from this dated CRAN snapshot, so a rebuild gets
+                            # the same versions.
+                            'cranSnapshot': {
+                                'type': 'string',
+                                'regex': r'^\d{4}-\d{2}-\d{2}$',
                             },
-                            # Passed through to rwasm::add_pkg(). Its default
-                            # is FALSE, meaning dependencies are not built, so
-                            # anything with hard dependencies needs NA.
+                            # pkgdepends' dependency mode. FALSE builds no
+                            # dependencies, so anything with hard dependencies
+                            # needs NA.
                             'dependencies': {
                                 'type': 'string',
                                 'allowed': ['FALSE', 'NA', 'TRUE'],
@@ -274,7 +278,10 @@ schema = {
                             # emscriptenVersion does for the emscripten
                             # strategy. The wasm binaries are only loadable by
                             # the webR release they were built against.
-                            'webrVersion': {'type': 'string'},
+                            'webrVersion': {
+                                'type': 'string',
+                                'regex': r'^\d+\.\d+\.\d+$',
+                            },
                         },
                         'required': False
                     },
