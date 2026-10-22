@@ -3,8 +3,9 @@
 # type_definitions.py, so every binary example describes the same data:
 # the 98 bp sequence "seq", its two paired reads and its one variant.
 #
-# Needs samtools, bcftools, minimap2, ropebwt3, centrifuge-build, bedToBigBed
-# and bedGraphToBigWig on PATH. Run from anywhere; writes next to this script.
+# Needs samtools, bcftools, minimap2, ropebwt3, yak, centrifuge-build,
+# bedToBigBed and bedGraphToBigWig on PATH. Run from anywhere; writes
+# next to this script.
 set -euo pipefail
 
 out=$(cd "$(dirname "$0")" && pwd)
@@ -36,6 +37,7 @@ bcftools view --no-version -Ob -o calls.bcf calls.vcf
 bcftools index -c -o calls.bcf.csi calls.bcf
 minimap2 -d ref.mmi ref.fa
 ropebwt3 build -d -o ref.fmd ref.fa
+yak count -o ref.yak ref.fa
 # Prefix tables of 4 bases keep the index at 10 kB; the default ones take 8 MB
 centrifuge-build -q -t 4 --conversion-table ref.conv --taxonomy-tree nodes.dmp --name-table names.dmp \
     --size-table ref.sizes ref.fa ref
@@ -60,6 +62,7 @@ cp calls.bcf "$out/example.bcf"
 cp calls.bcf.csi "$out/example.bcf.csi"
 cp ref.mmi "$out/example.mmi"
 cp ref.fmd "$out/example.fmd"
+cp ref.yak "$out/example.yak"
 cp ref.cf "$out/example.cf"
 cp peaks.bb "$out/example.bb"
 cp cov.bw "$out/example.bw"
