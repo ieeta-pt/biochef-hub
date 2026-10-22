@@ -255,6 +255,8 @@ def _catalog_entry(
     js_digest = wasm.get("js_digest")
     if not is_sha256_digest(wasm_digest) or not is_sha256_digest(js_digest):
         raise CatalogError(f"Bundle {operation_id}@{version} lacks valid JS/WASM digests")
+    if "data_digest" in wasm and not is_sha256_digest(wasm["data_digest"]):
+        raise CatalogError(f"Bundle {operation_id}@{version} has an invalid data digest")
     runtime_files = wasm.get("files") or [
         {"path": f"runtime/wasm/{bundle.get('bin')}.wasm", "digest": wasm_digest},
         {"path": f"runtime/wasm/{bundle.get('bin')}.js", "digest": js_digest},
@@ -264,6 +266,7 @@ def _catalog_entry(
         bin_name=bundle.get("bin"),
         wasm_digest=wasm_digest,
         js_digest=js_digest,
+        data_digest=wasm.get("data_digest"),
         bundle_name=f"{operation_id}@{version}",
     )
 
@@ -287,6 +290,7 @@ def _catalog_entry(
             "wasm": {
                 "wasm_digest": wasm_digest,
                 "js_digest": js_digest,
+                **({"data_digest": wasm["data_digest"]} if "data_digest" in wasm else {}),
                 "files": runtime_files,
             },
         },
@@ -324,7 +328,7 @@ def _catalog_entry(
     }
 
 
-def _validate_wasm_runtime_files(runtime_files: Any, *, bin_name: Any, wasm_digest: str, js_digest: str, bundle_name: str) -> None:
+def _validate_wasm_runtime_files(runtime_files: Any, *, bin_name: Any, wasm_digest: str, js_digest: str, bundle_name: str, data_digest: str | None = None) -> None:
     if not isinstance(bin_name, str) or not bin_name or bin_name in {".", ".."} or "/" in bin_name or "\\" in bin_name:
         raise CatalogError(f"Bundle {bundle_name} has an unsafe binary name")
     if not isinstance(runtime_files, list):
@@ -334,6 +338,10 @@ def _validate_wasm_runtime_files(runtime_files: Any, *, bin_name: Any, wasm_dige
         f"runtime/wasm/{bin_name}.js",
         f"runtime/wasm/{bin_name}.wasm",
     }
+    if data_digest is not None:
+        if not is_sha256_digest(data_digest):
+            raise CatalogError(f"Bundle {bundle_name} has an invalid data digest")
+        allowed_paths.add(f"runtime/wasm/{bin_name}.data")
     files_by_path = {}
     for item in runtime_files:
         if not isinstance(item, dict):
@@ -357,6 +365,8 @@ def _validate_wasm_runtime_files(runtime_files: Any, *, bin_name: Any, wasm_dige
         f"runtime/wasm/{bin_name}.wasm": wasm_digest,
         f"runtime/wasm/{bin_name}.js": js_digest,
     }
+    if data_digest is not None:
+        expected[f"runtime/wasm/{bin_name}.data"] = data_digest
     if files_by_path != expected:
         raise CatalogError(f"Bundle {bundle_name} WASM runtime files do not match declared digests")
 
@@ -590,6 +600,8 @@ def _validate_preserved_catalog_entry(
     wasm = ((entry.get("runtime") or {}).get("wasm") or {})
     if not is_sha256_digest(wasm.get("wasm_digest")) or not is_sha256_digest(wasm.get("js_digest")):
         raise CatalogError(f"Existing catalog package has invalid runtime digests: {package}")
+    if "data_digest" in wasm and not is_sha256_digest(wasm["data_digest"]):
+        raise CatalogError(f"Existing catalog package has an invalid data digest: {package}")
 
 
 def _json_object_bytes(value: bytes, label: str) -> dict[str, Any]:
