@@ -198,6 +198,13 @@ TYPE_DEFINITIONS = [
         "example_file": "example.fmd",
     },
     {
+        "id": "YAK",
+        "input": True,
+        "output": True,
+        "kind": "binary",
+        "example_file": "example.yak",
+    },
+    {
         # A BGT genotype database (bgt): a tar of bgt.bcf, bgt.bcf.csi,
         # bgt.pbf and bgt.spl, the files bgt import writes for a prefix.
         "id": "BGT",
