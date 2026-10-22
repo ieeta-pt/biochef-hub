@@ -254,6 +254,27 @@ def validate_list(content):
             return False
     return True
 
+def validate_fmf(content):
+    """bgt's Flat Metadata Format: per line a name, then tab-separated
+    key:type:value fields, type Z (text), f (number) or i (integer). A file
+    without any field is a plain list of names."""
+    has_field = False
+    for line in content.strip().split('\n'):
+        fields = line.rstrip('\r').split('\t')
+        if not fields[0]:
+            return False
+        for field in fields[1:]:
+            match = re.fullmatch(r'([^:]+):([Zfi]):(.*)', field)
+            if not match:
+                return False
+            kind, value = match.group(2), match.group(3)
+            if kind == 'i' and not re.fullmatch(r'[+-]?\d+', value):
+                return False
+            if kind == 'f' and not re.fullmatch(r'[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?', value):
+                return False
+            has_field = True
+    return has_field
+
 def validate_clustal(content):
     if not content or not content.strip():
         return False
@@ -409,6 +430,7 @@ ALL_TYPES = [
     {'type': 'VCF', 'validator': validate_vcf},
     {'type': 'SAM', 'validator': validate_sam},
     {'type': 'BED', 'validator': validate_bed},
+    {'type': 'FMF', 'validator': validate_fmf},
     {'type': 'LIST', 'validator': validate_list},
     {'type': 'GFF', 'validator': validate_gff},
     {'type': 'GTF', 'validator': validate_gtf},
