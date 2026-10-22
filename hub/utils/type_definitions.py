@@ -198,6 +198,13 @@ TYPE_DEFINITIONS = [
         "example_file": "example.fmd",
     },
     {
+        "id": "YAK",
+        "input": True,
+        "output": True,
+        "kind": "binary",
+        "example_file": "example.yak",
+    },
+    {
         "id": "PSMC_CPG",
         "input": True,
         "output": True,
