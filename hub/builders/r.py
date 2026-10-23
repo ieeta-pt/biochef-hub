@@ -15,6 +15,7 @@ from builders.container import (
     extract_container_archive,
     file_digest,
     image_evidence,
+    is_sha256_digest,
     safe_segment,
 )
 from builders.native import download_source_file
@@ -65,9 +66,21 @@ info <- info[!duplicated(info$package), ]
 # own R, but webR's library holds only the base packages, so they are built
 # like any other dependency.
 
-patched <- readLines(system.file("webr-remotes", package = "rwasm"))
+remotes_file <- system.file("webr-remotes", package = "rwasm")
+# The aliases below were checked against this exact list: a fork whose
+# repository is not named after its package is otherwise missed, since rwasm
+# substitutes by package name. A different list stops the build until they are
+# checked again.
+remotes_digest <- paste0("sha256:", sub(" .*$", "", system2("sha256sum", remotes_file, stdout = TRUE)))
+if (!identical(remotes_digest, Sys.getenv("BIOCHEF_WEBR_REMOTES"))) {
+  stop("rwasm's list of webR-patched packages is not the one reviewed (",
+       remotes_digest, "); check which forks are named differently from ",
+       "their package before updating webr_remotes in r-builder.lock.json")
+}
+patched <- readLines(remotes_file)
 patched <- sub("@.*$", "", basename(patched))
-# The fork of igraph is named after its repository.
+# r-wasm/rigraph is the one fork in the list whose DESCRIPTION names another
+# package: igraph.
 patched[patched == "rigraph"] <- "igraph"
 clash <- intersect(info$package, patched)
 if (length(clash) > 0) {
@@ -114,6 +127,9 @@ def load_lock():
     for version, reference in (lock.get("webr") or {}).items():
         if not DIGEST_REFERENCE.fullmatch(str(reference)):
             raise RuntimeError(f"webR {version} image must be pinned by OCI digest")
+    for version in lock.get("webr") or {}:
+        if not is_sha256_digest((lock.get("webr_remotes") or {}).get(version)):
+            raise RuntimeError(f"webR {version} has no reviewed webr-remotes digest")
     if not str(lock.get("cran_snapshot_base", "")).startswith("https://"):
         raise RuntimeError("CRAN snapshot base must be an HTTPS URL")
     return lock
@@ -213,6 +229,7 @@ def build(tool_name, recipe_dir, r_settings, declared_source, output_dir="build"
                 "BIOCHEF_SOURCE": source_file.name,
                 "BIOCHEF_CRAN_SNAPSHOT": snapshot,
                 "BIOCHEF_DEPENDENCIES": dependencies,
+                "BIOCHEF_WEBR_REMOTES": lock["webr_remotes"][webr_version],
                 # rwasm unpacks each source tarball as root, and with every
                 # capability dropped tar cannot restore the original owners.
                 # It still extracts every file, then exits 2 and rwasm reports
