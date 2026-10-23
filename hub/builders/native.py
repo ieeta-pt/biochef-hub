@@ -8,6 +8,8 @@ from urllib.parse import urlparse
 import requests
 
 from builders.bundle_evidence import (
+    collect_declared_dependencies,
+    combine_dependencies,
     collect_git_dependencies,
     command_output,
     file_digest,
@@ -96,7 +98,7 @@ def download_source_file(source, source_dir):
     }
 
 
-def build(tool_name, recipe_dir, settings, source, output_dir="build"):
+def build(tool_name, recipe_dir, settings, source, output_dir="build", dependencies=None):
     evidence = {
         "builder": "native",
         "source": {"declared": source},
@@ -128,11 +130,11 @@ def build(tool_name, recipe_dir, settings, source, output_dir="build"):
                     check=True,
                 )
             actual_source = None
-            dependencies = None
+            submodules = None
         elif source.get("url"):
             source_dir.mkdir(parents=True)
             actual_source = download_source_file(source, source_dir)
-            dependencies = []
+            submodules = []
         else:
             raise RuntimeError(
                 "Native builds require source.repo + source.commit or source.url + source.sha256"
@@ -191,9 +193,12 @@ def build(tool_name, recipe_dir, settings, source, output_dir="build"):
                 tag=tag,
                 commit=commit,
             )["actual"]
-            dependencies = collect_git_dependencies(source_dir)
+            submodules = collect_git_dependencies(source_dir)
         evidence["source"]["actual"] = actual_source
-        evidence["dependencies"] = dependencies
+        evidence["dependencies"] = combine_dependencies(
+            submodules,
+            collect_declared_dependencies(source_dir, dependencies, "native"),
+        )
         return {
             "output_dir": str(destination),
             "source_dir": str(source_dir),
