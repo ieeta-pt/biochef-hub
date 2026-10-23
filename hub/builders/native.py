@@ -12,6 +12,7 @@ from builders.bundle_evidence import (
     command_output,
     file_digest,
     git_source_evidence,
+    source_date_epoch,
 )
 from builders.container import (
     is_sha256_hex,
@@ -156,10 +157,16 @@ def build(tool_name, recipe_dir, settings, source, output_dir="build"):
         ]
         evidence["build_tools"] = observe_build_tools(settings["buildTools"])
 
+        env = os.environ.copy()
+        epoch = source_date_epoch(source_dir) if repo_url else None
+        if epoch:
+            env["SOURCE_DATE_EPOCH"] = epoch
+            evidence["source_date_epoch"] = int(epoch)
         subprocess.run(
             ["bash", f"./{source_script.name}"],
             cwd=source_dir,
             check=True,
+            env=env,
         )
         if file_digest(source_script) != script_digest:
             raise RuntimeError("Native build script changed during the build")

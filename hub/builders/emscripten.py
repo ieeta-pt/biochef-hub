@@ -10,6 +10,7 @@ from builders.bundle_evidence import (
     emsdk_commit,
     file_digest,
     git_source_evidence,
+    source_date_epoch,
 )
 from builders.container import safe_child_path
 
@@ -111,6 +112,10 @@ def build(tool_name, recipe_dir, emscripten_settings, source, output_dir="build"
         shutil.copyfile(recipe_script, source_script)
 
         env = os.environ.copy()
+        epoch = source_date_epoch(source_dir)
+        if epoch:
+            env["SOURCE_DATE_EPOCH"] = epoch
+            evidence["source_date_epoch"] = int(epoch)
         env["EM_FLAGS"] = (
             "-s USE_ZLIB=1 "
             "-s INVOKE_RUN=0 "
