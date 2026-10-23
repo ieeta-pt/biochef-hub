@@ -3,6 +3,7 @@ import binascii
 import hashlib
 import json
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,6 +34,13 @@ CATALOG_RESULTS_SCHEMA = "biochef.catalog-publish-results.v1"
 CATALOG_MEDIA_TYPE = "application/vnd.biochef.verified-catalog+json"
 CATALOG_SIGNATURE_MEDIA_TYPE = "application/vnd.biochef.catalog-signature+json"
 OCI_MANIFEST_MEDIA_TYPE = "application/vnd.oci.image.manifest.v1+json"
+# An R operation ships the package library every operation of its recipe shares,
+# and the script named in `bin`, in place of a compiled binary.
+R_LIBRARY_FILES = {
+    "runtime/wasm/library.data.gz": "library_digest",
+    "runtime/wasm/library.js.metadata": "metadata_digest",
+}
+WEBR_VERSION = re.compile(r"\d+\.\d+\.\d+")
 
 
 class CatalogError(RuntimeError):
@@ -250,25 +258,44 @@ def _catalog_entry(
             f"Build evidence Hub commit changed after verification for {operation_id}@{version}"
         )
     runtime = bundle.get("runtime") or {}
-    wasm = runtime.get("wasm") or {}
-    wasm_digest = wasm.get("wasm_digest")
-    js_digest = wasm.get("js_digest")
-    if not is_sha256_digest(wasm_digest) or not is_sha256_digest(js_digest):
-        raise CatalogError(f"Bundle {operation_id}@{version} lacks valid JS/WASM digests")
-    if "data_digest" in wasm and not is_sha256_digest(wasm["data_digest"]):
-        raise CatalogError(f"Bundle {operation_id}@{version} has an invalid data digest")
-    runtime_files = wasm.get("files") or [
-        {"path": f"runtime/wasm/{bundle.get('bin')}.wasm", "digest": wasm_digest},
-        {"path": f"runtime/wasm/{bundle.get('bin')}.js", "digest": js_digest},
-    ]
-    _validate_wasm_runtime_files(
-        runtime_files,
-        bin_name=bundle.get("bin"),
-        wasm_digest=wasm_digest,
-        js_digest=js_digest,
-        data_digest=wasm.get("data_digest"),
-        bundle_name=f"{operation_id}@{version}",
-    )
+    if "r" in runtime:
+        if "wasm" in runtime:
+            raise CatalogError(f"Bundle {operation_id}@{version} declares both a WASM and an R runtime")
+        catalog_runtime = {
+            "r": _validate_r_runtime(
+                runtime["r"],
+                bin_name=bundle.get("bin"),
+                bundle_name=f"{operation_id}@{version}",
+            )
+        }
+    else:
+        wasm = runtime.get("wasm") or {}
+        wasm_digest = wasm.get("wasm_digest")
+        js_digest = wasm.get("js_digest")
+        if not is_sha256_digest(wasm_digest) or not is_sha256_digest(js_digest):
+            raise CatalogError(f"Bundle {operation_id}@{version} lacks valid JS/WASM digests")
+        if "data_digest" in wasm and not is_sha256_digest(wasm["data_digest"]):
+            raise CatalogError(f"Bundle {operation_id}@{version} has an invalid data digest")
+        runtime_files = wasm.get("files") or [
+            {"path": f"runtime/wasm/{bundle.get('bin')}.wasm", "digest": wasm_digest},
+            {"path": f"runtime/wasm/{bundle.get('bin')}.js", "digest": js_digest},
+        ]
+        _validate_wasm_runtime_files(
+            runtime_files,
+            bin_name=bundle.get("bin"),
+            wasm_digest=wasm_digest,
+            js_digest=js_digest,
+            data_digest=wasm.get("data_digest"),
+            bundle_name=f"{operation_id}@{version}",
+        )
+        catalog_runtime = {
+            "wasm": {
+                "wasm_digest": wasm_digest,
+                "js_digest": js_digest,
+                **({"data_digest": wasm["data_digest"]} if "data_digest" in wasm else {}),
+                "files": runtime_files,
+            },
+        }
 
     digest_reference = artifact.get("digest_reference")
     if not isinstance(digest_reference, str) or "@sha256:" not in digest_reference:
@@ -287,12 +314,7 @@ def _catalog_entry(
         "manifest_digest": artifact.get("version_digest"),
         "runtime": {
             "modes": runtime.get("modes", []),
-            "wasm": {
-                "wasm_digest": wasm_digest,
-                "js_digest": js_digest,
-                **({"data_digest": wasm["data_digest"]} if "data_digest" in wasm else {}),
-                "files": runtime_files,
-            },
+            **catalog_runtime,
         },
         "evidence": {
             "bundle_json": local_evidence["bundle_json"],
@@ -369,6 +391,46 @@ def _validate_wasm_runtime_files(runtime_files: Any, *, bin_name: Any, wasm_dige
         expected[f"runtime/wasm/{bin_name}.data"] = data_digest
     if files_by_path != expected:
         raise CatalogError(f"Bundle {bundle_name} WASM runtime files do not match declared digests")
+
+
+def _validate_r_runtime(r_runtime: Any, *, bin_name: Any, bundle_name: str) -> dict[str, Any]:
+    """Checks an R runtime block and returns the part the catalog carries.
+
+    `bin_name` is None for an entry preserved from an earlier catalog, which
+    does not carry `bin`; the script is then whichever file is not the library.
+    """
+    if not isinstance(r_runtime, dict):
+        raise CatalogError(f"Bundle {bundle_name} has an invalid R runtime")
+    webr_version = r_runtime.get("webr_version")
+    if not isinstance(webr_version, str) or not WEBR_VERSION.fullmatch(webr_version):
+        raise CatalogError(f"Bundle {bundle_name} has an invalid webR version")
+    digests = {key: r_runtime.get(key) for key in ("library_digest", "metadata_digest", "script_digest")}
+    if not all(is_sha256_digest(value) for value in digests.values()):
+        raise CatalogError(f"Bundle {bundle_name} lacks valid R runtime digests")
+    runtime_files = r_runtime.get("files")
+    if not isinstance(runtime_files, list) or not all(isinstance(item, dict) for item in runtime_files):
+        raise CatalogError(f"Bundle {bundle_name} has invalid R runtime file evidence")
+    files_by_path = {}
+    for item in runtime_files:
+        path = item.get("path")
+        if not isinstance(path, str) or path in files_by_path:
+            raise CatalogError(f"Bundle {bundle_name} has invalid R runtime file evidence")
+        files_by_path[path] = item.get("digest")
+
+    if bin_name is None:
+        scripts = [path for path in files_by_path if path not in R_LIBRARY_FILES]
+        bin_name = scripts[0].removeprefix("runtime/wasm/") if len(scripts) == 1 else None
+    if not isinstance(bin_name, str) or not bin_name or bin_name in {".", ".."} or "/" in bin_name or "\\" in bin_name:
+        raise CatalogError(f"Bundle {bundle_name} has an unsafe script name")
+    expected = {path: digests[key] for path, key in R_LIBRARY_FILES.items()}
+    expected[f"runtime/wasm/{bin_name}"] = digests["script_digest"]
+    if files_by_path != expected:
+        raise CatalogError(f"Bundle {bundle_name} R runtime files do not match declared digests")
+    return {
+        "webr_version": webr_version,
+        **digests,
+        "files": runtime_files,
+    }
 
 
 def _pull_verified_catalog(
@@ -597,7 +659,13 @@ def _validate_preserved_catalog_entry(
         or not is_sha256_digest(attachment.rsplit("@", 1)[-1])
     ):
         raise CatalogError(f"Existing catalog SLSA evidence is invalid: {package}")
-    wasm = ((entry.get("runtime") or {}).get("wasm") or {})
+    runtime = entry.get("runtime") or {}
+    if "r" in runtime:
+        if "wasm" in runtime:
+            raise CatalogError(f"Existing catalog package declares both a WASM and an R runtime: {package}")
+        _validate_r_runtime(runtime["r"], bin_name=None, bundle_name=package)
+        return
+    wasm = runtime.get("wasm") or {}
     if not is_sha256_digest(wasm.get("wasm_digest")) or not is_sha256_digest(wasm.get("js_digest")):
         raise CatalogError(f"Existing catalog package has invalid runtime digests: {package}")
     if "data_digest" in wasm and not is_sha256_digest(wasm["data_digest"]):
