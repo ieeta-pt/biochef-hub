@@ -51,6 +51,7 @@ def build_wasm(recipe, recipe_dir, build_dir):
             wasm_settings["emscripten"],
             source,
             output_dir=build_dir,
+            patches=wasm_settings.get("patches"),
         )
 
     output_dir = None
