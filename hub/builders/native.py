@@ -18,6 +18,7 @@ from builders.container import (
     safe_child_path,
     safe_segment,
 )
+from builders.patches import apply_patches
 
 MAX_SOURCE_BYTES = 100 * 1024 * 1024
 BUILD_TOOLS = {
@@ -129,7 +130,14 @@ def build(tool_name, recipe_dir, settings, source, output_dir="build"):
                 )
             actual_source = None
             dependencies = None
+            evidence["patches"] = apply_patches(
+                recipe_dir, settings.get("patches"), source_dir
+            )
         elif source.get("url"):
+            # The archive is unpacked by the build script, so there is no tree
+            # to patch yet; validation refuses patches for a url source.
+            if settings.get("patches"):
+                raise RuntimeError("Patches require a git source (source.repo)")
             source_dir.mkdir(parents=True)
             actual_source = download_source_file(source, source_dir)
             dependencies = []

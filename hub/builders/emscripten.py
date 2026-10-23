@@ -12,6 +12,7 @@ from builders.bundle_evidence import (
     git_source_evidence,
 )
 from builders.container import safe_child_path
+from builders.patches import apply_patches
 
 
 def activate_emscripten_version(emscripten_version):
@@ -44,7 +45,7 @@ def activate_emscripten_version(emscripten_version):
     )
     return True
 
-def build(tool_name, recipe_dir, emscripten_settings, source, output_dir="build"):
+def build(tool_name, recipe_dir, emscripten_settings, source, output_dir="build", patches=None):
     repo_url, tag, commit = source
     emscripten_version = emscripten_settings.get("emscriptenVersion")
     evidence = {
@@ -98,6 +99,7 @@ def build(tool_name, recipe_dir, emscripten_settings, source, output_dir="build"
                 ["git", "-C", str(source_dir), "checkout", f"tags/{tag}"],
                 check=True,
             )
+        evidence["patches"] = apply_patches(recipe_dir, patches, source_dir)
 
         build_script = emscripten_settings["buildScript"]
         recipe_script = safe_child_path(recipe_dir, build_script, "buildScript")
