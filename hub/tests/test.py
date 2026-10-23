@@ -156,6 +156,7 @@ def run_wasm_tool(wasm_path, argv, tool_input, input_files, tmp_path):
     # path treats it, since some tools exit non-zero by design.
     if run.get("exitCode"):
         print(f"[WARNING] Tool exited with status {run['exitCode']}")
+        print(safe(run.get("stderr")).strip()[:600])
 
     return run.get("stdout", ""), run.get("stderr", "")
 
@@ -296,6 +297,7 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
                     return False
                 if result.returncode:
                     print(f"[WARNING] Tool exited with status {result.returncode}")
+                    print(safe(stderr).strip()[:600])
 
             all_ok = True
 
@@ -340,10 +342,17 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
                     print(f"[TODO] Unsupported output mode: {output_def}")
                     all_ok = False
                     continue
+                # Checked before detection: the TEXT validator accepts anything,
+                # so an empty TEXT output was not reported at all.
+                if not content.strip():
+                    print(f"[WARNING] Empty output ({output_name}, {tool_bundle['name']}, {cmd})")
+                    print("stderr:")
+                    print(safe(stderr).strip())
+                    continue
                 detected = detect_data_type(content, output_def["types"])
 
                 if not detected:
-                    print(f"[WARNING] Empty output ({output_name}, {tool_bundle['name']}, {cmd})")
+                    print(f"[WARNING] Output matches none of its declared types ({output_name}, {tool_bundle['name']}, {cmd})")
                     print("stderr:")
                     print(safe(stderr).strip())
                 elif detected not in output_def["types"]:
