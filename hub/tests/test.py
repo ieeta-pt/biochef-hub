@@ -2,8 +2,11 @@ import os
 import subprocess
 import json
 import base64
+import hashlib
 import shutil
+import tarfile
 import tempfile
+import urllib.request
 from pathlib import Path
 import random
 import string
@@ -47,8 +50,13 @@ def test_tools(registry_dir):
                 "native": version_dir / "runtime" / "native" / bin_name,
                 "wasm": version_dir / "runtime" / "wasm" / f"{bin_name}.js",
             }
-            runtimes = [runtime for runtime, artifact in artifacts.items()
-                        if runtime in tool_bundle.get("runtime", {}) or artifact.is_file()]
+            if "r" in tool_bundle.get("runtime", {}):
+                # An R operation's runtime is the package library and its
+                # script, run under webR, not a wasm binary of its own.
+                runtimes = ["r"]
+            else:
+                runtimes = [runtime for runtime, artifact in artifacts.items()
+                            if runtime in tool_bundle.get("runtime", {}) or artifact.is_file()]
             if not runtimes:
                 print(f"[SKIP] No native or wasm artifact found for: {bin_name}")
 
@@ -70,6 +78,49 @@ def test_tools(registry_dir):
 example_inputs = get_example_inputs()
 
 WASM_HARNESS = Path(__file__).resolve().parent / "run_wasm.js"
+R_HARNESS = Path(__file__).resolve().parent / "run_r.mjs"
+WEBR_LOCK = Path(__file__).resolve().parent / "webr-runtime.lock.json"
+
+# One extracted webR per version for the whole run, since booting is the slow
+# part and every R operation of a recipe uses the same release.
+_webr_modules = {}
+
+
+def webr_module(version):
+    """Returns the path of webR's Node entry point for `version`.
+
+    The npm tarball is fetched from the URL in webr-runtime.lock.json and
+    checked against the integrity recorded there before it is unpacked. Only
+    the tarball is used, not `npm install`: dist/webr.mjs runs on its own, and
+    installing would pull in its declared dependencies (React, CodeMirror and
+    the rest of the REPL) unpinned.
+    """
+    if version in _webr_modules:
+        return _webr_modules[version]
+
+    entry = (json.loads(WEBR_LOCK.read_text(encoding="utf-8")).get(version) or {})
+    url = entry.get("url")
+    integrity = entry.get("integrity")
+    if not isinstance(url, str) or not url.startswith("https://") or not str(integrity).startswith("sha512-"):
+        raise RuntimeError(f"No pinned webR {version} in {WEBR_LOCK.name}")
+
+    with urllib.request.urlopen(url, timeout=120) as response:
+        tarball = response.read()
+    actual = "sha512-" + base64.b64encode(hashlib.sha512(tarball).digest()).decode("ascii")
+    if actual != integrity:
+        raise RuntimeError(f"webR {version} tarball does not match its pinned integrity")
+
+    destination = Path(tempfile.mkdtemp(prefix=f"webr-{version}-"))
+    tarball_path = destination / "webr.tgz"
+    tarball_path.write_bytes(tarball)
+    with tarfile.open(tarball_path) as archive:
+        archive.extractall(destination, filter="data")
+    module = destination / "package" / "dist" / "webr.mjs"
+    if not module.is_file():
+        raise RuntimeError(f"webR {version} tarball has no dist/webr.mjs")
+
+    _webr_modules[version] = module
+    return module
 
 
 def safe(text):
@@ -83,8 +134,12 @@ def safe(text):
     return (text or "").encode("utf-8", errors="replace").decode("utf-8")
 
 
-def run_wasm_tool(wasm_path, argv, tool_input, input_files, tmp_path):
-    """Runs a wasm tool through the Node harness.
+def run_wasm_tool(harness, argv, tool_input, input_files, tmp_path, extra_spec=None, timeout=60):
+    """Runs a wasm tool, or an R operation, through a Node harness.
+
+    `harness` is the harness and its leading arguments: run_wasm.js and the
+    module, or run_r.mjs, webR and the runtime directory. Both take the same
+    spec and give the same result.
 
     Returns (stdout, stderr), or None if the tool could not be run at all --
     which is a test failure rather than something to report as tool output.
@@ -92,6 +147,7 @@ def run_wasm_tool(wasm_path, argv, tool_input, input_files, tmp_path):
     the results exactly as it does for a native binary.
     """
     spec = {
+        **(extra_spec or {}),
         "argv": argv,
         "stdin": tool_input,
         "files": {
@@ -105,9 +161,9 @@ def run_wasm_tool(wasm_path, argv, tool_input, input_files, tmp_path):
 
     try:
         result = subprocess.run(
-            ["node", str(WASM_HARNESS), str(wasm_path), str(spec_path)],
+            ["node", *map(str, harness), str(spec_path)],
             capture_output=True,
-            timeout=60,
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired:
         print("[Error] Tool execution timed out")
@@ -143,12 +199,12 @@ def run_wasm_tool(wasm_path, argv, tool_input, input_files, tmp_path):
             print("[SKIP] Built without node support, so it cannot be run here")
             return "", ""
 
-        print("[Error] The wasm module failed to load")
+        print("[Error] The wasm module or the R runtime failed to load")
         print(safe(run.get("stderr"))[:600])
         return None
 
     if not run.get("completed"):
-        print("[Error] The wasm module trapped part way through")
+        print("[Error] The wasm module or the R runtime trapped part way through")
         print(safe(run.get("stderr"))[:600])
         return None
 
@@ -179,8 +235,9 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
             bin_name = tool_bundle.get("bin")
             bin_path = tmp_path / "runtime" / "native" / bin_name
             wasm_path = tmp_path / "runtime" / "wasm" / f"{bin_name}.js"
+            script_path = tmp_path / "runtime" / "wasm" / bin_name
 
-            artifact = bin_path if runtime == "native" else wasm_path
+            artifact = {"native": bin_path, "wasm": wasm_path, "r": script_path}[runtime]
             if not artifact.is_file():
                 print(f"[Error] Missing {runtime} artifact for: {bin_name}")
                 return False
@@ -240,9 +297,9 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
                     if input_def.get("flag"):
                         cmd.append(input_def["flag"])
 
-                    # A wasm tool sees its own virtual filesystem, where the
-                    # host path means nothing.
-                    argument = file_name if runtime == "wasm" else str(file_path)
+                    # A wasm tool or an R script sees its own virtual
+                    # filesystem, where the host path means nothing.
+                    argument = str(file_path) if runtime == "native" else file_name
                     if input_def.get("flag"):
                         cmd.append(argument)
                     else:
@@ -270,8 +327,21 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
 
             # Run tool
             print(f"Testing tool {tool_bundle['name']} ({runtime}) with command {cmd}")
-            if runtime == "wasm":
-                run = run_wasm_tool(wasm_path, cmd, tool_input, input_files, tmp_path)
+            if runtime in ("wasm", "r"):
+                if runtime == "wasm":
+                    run = run_wasm_tool([WASM_HARNESS, wasm_path], cmd, tool_input, input_files, tmp_path)
+                else:
+                    webr_version = tool_bundle["runtime"]["r"]["webr_version"]
+                    run = run_wasm_tool(
+                        [R_HARNESS, webr_module(webr_version), script_path.parent],
+                        cmd,
+                        tool_input,
+                        input_files,
+                        tmp_path,
+                        extra_spec={"script": bin_name, "webrVersion": webr_version},
+                        # Booting webR and mounting the library take most of it.
+                        timeout=300,
+                    )
                 if run is None:
                     return False
                 stdout, stderr = run
