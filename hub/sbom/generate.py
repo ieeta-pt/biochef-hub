@@ -335,7 +335,7 @@ def formulation_components(evidence):
     for runtime_data in (evidence.get("runtimes") or {}).values():
         build = runtime_data.get("build") or {}
         for key, component in (
-            ("builder_image", image_component(build.get("builder_image"))),
+            ("builder_image", image_component(build.get("builder_image"), build.get("builder"))),
             ("framework", framework_component(build.get("framework"))),
             ("toolchain", toolchain_component(build.get("toolchain"))),
         ):
@@ -353,14 +353,14 @@ def formulation_components(evidence):
     return components
 
 
-def image_component(image):
+def image_component(image, builder):
     if not isinstance(image, dict):
         return None
     digest = image.get("manifest_digest") or image.get("image_id")
     return {
         "type": "container",
-        "bom-ref": "build:biowasm-image",
-        "name": "biochef-biowasm-builder",
+        "bom-ref": f"build:{builder or 'unknown'}-image",
+        "name": image_repository(image.get("requested_reference")) or "build-image",
         "version": digest,
         "hashes": digest_hashes(digest),
         "properties": properties(
@@ -370,6 +370,16 @@ def image_component(image):
             }
         ),
     }
+
+
+def image_repository(reference):
+    """The repository of an image reference, without its tag or digest."""
+    if not isinstance(reference, str) or not reference:
+        return None
+    repository = reference.split("@", 1)[0]
+    name_start = repository.rfind("/") + 1
+    tag = repository.find(":", name_start)
+    return repository[:tag] if tag != -1 else repository
 
 
 def framework_component(framework):

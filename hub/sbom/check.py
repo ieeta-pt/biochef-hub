@@ -301,39 +301,52 @@ def check_runtime(runtime, build, declared_source, summary, bundle_name):
             "Direct Emscripten build has no exact emsdk commit",
         )
 
-    if build.get("builder") == "biowasm":
+    builder_label = {"biowasm": "BioWASM", "r": "R"}.get(build.get("builder"))
+    if builder_label:
         image = build.get("builder_image") or {}
-        framework = build.get("framework") or {}
         require(
             summary,
             bundle_name,
             is_sha256_digest(image.get("image_id")),
             "BUILDER_IMAGE",
-            "BioWASM builder image has no immutable image ID",
+            f"{builder_label} builder image has no immutable image ID",
         )
         requested_image = image.get("requested_reference")
-        if isinstance(requested_image, str) and "@sha256:" in requested_image:
+        pinned = isinstance(requested_image, str) and "@sha256:" in requested_image
+        if build.get("builder") == "r":
+            # The webR image is pulled, never built from a hashed context, so
+            # the digest in its reference is the only thing that pins it.
+            require(
+                summary,
+                bundle_name,
+                pinned,
+                "BUILDER_IMAGE",
+                "R builder image is not pinned by digest",
+            )
+        if pinned:
             require(
                 summary,
                 bundle_name,
                 image.get("manifest_digest")
                 == f"sha256:{requested_image.rsplit('@sha256:', 1)[1]}",
                 "BUILDER_IMAGE",
-                "BioWASM builder image manifest digest does not match its reference",
+                f"{builder_label} builder image manifest digest does not match its reference",
             )
+        require(
+            summary,
+            bundle_name,
+            (build.get("isolation") or {}).get("containerized") is True,
+            "BUILD_ISOLATION",
+            f"{builder_label} build was not recorded as containerized",
+        )
+    if build.get("builder") == "biowasm":
+        framework = build.get("framework") or {}
         require(
             summary,
             bundle_name,
             bool(COMMIT.fullmatch(str(framework.get("commit", "")))),
             "BIOWASM_COMMIT",
             "BioWASM framework has no exact commit",
-        )
-        require(
-            summary,
-            bundle_name,
-            (build.get("isolation") or {}).get("containerized") is True,
-            "BUILD_ISOLATION",
-            "BioWASM build was not recorded as containerized",
         )
 
     for dependency in build.get("dependencies") or []:
