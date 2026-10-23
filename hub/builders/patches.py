@@ -1,8 +1,15 @@
+import re
 import subprocess
 from pathlib import Path
 
 from builders.bundle_evidence import file_digest
 from builders.container import safe_child_path
+
+# A hunk on a submodule's commit pointer. A plain `git diff` writes one for a
+# submodule whose files were edited, and `git apply` accepts it and changes
+# nothing, so the build would run without the edit while the evidence listed
+# the patch as applied.
+SUBMODULE_POINTER = re.compile(r"^[-+]Subproject commit ", re.MULTILINE)
 
 
 def apply_patches(recipe_dir, patches, source_dir):
@@ -35,6 +42,11 @@ def apply_patches(recipe_dir, patches, source_dir):
             text = patch.read_bytes().decode("utf-8")
         except UnicodeDecodeError as exc:
             raise RuntimeError(f"Patch is not UTF-8 text: {declared}") from exc
+        if SUBMODULE_POINTER.search(text):
+            raise RuntimeError(
+                f"Patch changes a submodule's commit instead of its files: {declared}. "
+                "Generate it with `git diff --submodule=diff`."
+            )
 
         for check in (["--check"], []):
             result = subprocess.run(
