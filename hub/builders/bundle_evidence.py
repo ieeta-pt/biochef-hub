@@ -144,7 +144,10 @@ def combine_dependencies(submodules, declared):
             for path in covered
         )
     ]
-    return kept + declared
+    # Prefer the declared dependency when the same path appears twice.
+    by_path = {item["path"].rstrip("/"): item for item in declared}
+    by_path.update({item["path"].rstrip("/"): item for item in declared if item.get("declared")})
+    return kept + list(by_path.values())
 
 
 def normalize_git_url(value):
@@ -326,8 +329,10 @@ def collect_license_evidence(recipe, target_path, runtime_results=None):
                         dependency=name,
                     )
 
+    used_url_fallback = False
     if not has_license() and config.get("url"):
         files.append(download_declared_license(config, target_path))
+        used_url_fallback = True
 
     missing = {}
     has_license_file = has_license()
@@ -335,7 +340,8 @@ def collect_license_evidence(recipe, target_path, runtime_results=None):
         missing_licenses = [
             path for path in declared_files if not recorded("license", path)
         ]
-        if missing_licenses and not (config.get("url") and has_license_file):
+        # A URL only replaces missing files if its download succeeded.
+        if missing_licenses and not used_url_fallback:
             missing["license"] = missing_licenses
     elif not has_license_file:
         missing["license"] = license_paths
