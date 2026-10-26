@@ -99,6 +99,10 @@ def validate_spdx_license_expression(field, value, error):
     if unknown:
         error(field, f"unknown SPDX license identifier(s): {unknown}")
 
+def validate_unique_entries(field, value, error):
+    if len(value) != len(set(value)):
+        error(field, "entries must not repeat")
+
 def validate_safe_relative_path(field, value, error):
     candidate = Path(value)
     if not value or "\\" in value or candidate.is_absolute() or ".." in candidate.parts:
@@ -118,6 +122,9 @@ def builder_source_errors(recipe: dict) -> list[str]:
     wasm = build.get("wasm") or {}
     if wasm.get("strategy") == "emscripten" and not source.get("repo"):
         errors.append("Emscripten builds currently require source.repo + source.commit")
+    # biowasm applies its own patches, and `auto` may build through biowasm.
+    if wasm.get("patches") and wasm.get("strategy") != "emscripten":
+        errors.append("build.wasm.patches requires strategy emscripten")
     return errors
 
 schema = {
@@ -243,6 +250,13 @@ schema = {
                             'emscriptenVersion': {'type': 'string', 'required': True},
                         },
                         'required': False
+                    },
+                    'patches': {
+                        'type': 'list',
+                        'schema': {'type': 'string', 'check_with': validate_safe_relative_path},
+                        'minlength': 1,
+                        'check_with': validate_unique_entries,
+                        'required': False,
                     }
                 }
             },
@@ -256,6 +270,13 @@ schema = {
                         'schema': {'type': 'string', 'allowed': allowed_native_build_tools},
                         'minlength': 1,
                         'required': True,
+                    },
+                    'patches': {
+                        'type': 'list',
+                        'schema': {'type': 'string', 'check_with': validate_safe_relative_path},
+                        'minlength': 1,
+                        'check_with': validate_unique_entries,
+                        'required': False,
                     },
                 },
                 'required': False

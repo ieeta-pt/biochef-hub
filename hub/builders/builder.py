@@ -51,6 +51,7 @@ def build_wasm(recipe, recipe_dir, build_dir):
             wasm_settings["emscripten"],
             source,
             output_dir=build_dir,
+            patches=wasm_settings.get("patches"),
         )
 
     output_dir = None
@@ -99,7 +100,8 @@ def build_plugins(file_paths, build_dir, registry_dir):
                     recipe_dir,
                     recipe['build']["native"],
                     recipe["source"],
-                    output_dir=build_dir
+                    output_dir=build_dir,
+                    patches=recipe['build']["native"].get("patches"),
                 )
 
         for runtime in build_runtimes:
