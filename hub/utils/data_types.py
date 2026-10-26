@@ -101,10 +101,12 @@ def validate_vcf(content):
         if not re.fullmatch(r'[ACGTN]+', ref, re.I):
             return False
 
-        if not all(re.fullmatch(r'[ACGTN,]+', a, re.I) for a in alt.split(',')):
+        # Besides bases, VCF allows no ALT (.), a deletion placeholder (*),
+        # symbolic alleles such as <*> or <DEL>, and breakends such as G]2:42].
+        if not all(re.fullmatch(r'[ACGTN]+|[.*]|<[^<>]+>|[ACGTN.]*[\[\]].*', a, re.I) for a in alt.split(',')):
             return False
 
-        if qual != '.' and not re.fullmatch(r'\d+(\.\d+)?', qual):
+        if qual != '.' and not re.fullmatch(r'\d+(\.\d+)?([eE][-+]?\d+)?', qual):
             return False
 
     return header_found
@@ -218,7 +220,73 @@ def validate_paf(content):
                 return False
         if fields[4] not in ('+', '-'):
             return False
+        # A target written as a graph path (>s1<s2) makes the line GAF
+        if fields[5][:1] in ('>', '<'):
+            return False
     return True
+
+def validate_gaf(content):
+    if not content or not content.strip():
+        return False
+    lines = content.strip().split('\n')
+    for line in lines:
+        if not line.strip():
+            continue
+        fields = line.split('\t')
+        # GAF keeps PAF's 12 mandatory columns; the target is either a graph
+        # path such as >s1<s2 or, for a stable rGFA sequence, a plain name
+        if len(fields) < 12:
+            return False
+        for idx in (1, 2, 3, 6, 7, 8, 9, 10, 11):
+            if not fields[idx].lstrip('-').isdigit():
+                return False
+        if fields[4] not in ('+', '-'):
+            return False
+        if fields[5][:1] in ('>', '<') and not re.fullmatch(r'([<>][^<>\s]+)+', fields[5]):
+            return False
+    return True
+
+def validate_wig(content):
+    if not content or not content.strip():
+        return False
+    number = r'-?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?'
+    mode = None
+    has_data = False
+    for line in content.strip().split('\n'):
+        line = line.strip()
+        if not line or line.startswith('track') or line.startswith('browser'):
+            continue
+        # bigWigToWig writes a bedGraph-backed bigWig as commented sections
+        if line.startswith('#bedGraph section'):
+            mode = 'bedGraph'
+            continue
+        if line.startswith('#'):
+            continue
+        fields = line.split()
+        if fields[0] == 'variableStep':
+            if not any(f.startswith('chrom=') for f in fields[1:]):
+                return False
+            mode = 'variableStep'
+            continue
+        if fields[0] == 'fixedStep':
+            keys = {f.split('=')[0] for f in fields[1:]}
+            if not {'chrom', 'start', 'step'} <= keys:
+                return False
+            mode = 'fixedStep'
+            continue
+        if mode == 'variableStep':
+            ok = len(fields) == 2 and fields[0].isdigit() and re.fullmatch(number, fields[1])
+        elif mode == 'fixedStep':
+            ok = len(fields) == 1 and re.fullmatch(number, fields[0])
+        elif mode == 'bedGraph':
+            ok = len(fields) == 4 and fields[1].isdigit() and fields[2].isdigit() and re.fullmatch(number, fields[3])
+        else:
+            # Data before any declaration is not wiggle
+            return False
+        if not ok:
+            return False
+        has_data = True
+    return has_data
 
 def validate_gfa(content):
     if not content:
@@ -427,8 +495,10 @@ ALL_TYPES = [
     {'type': 'GFF', 'validator': validate_gff},
     {'type': 'GTF', 'validator': validate_gtf},
     {'type': 'PAF', 'validator': validate_paf},
+    {'type': 'GAF', 'validator': validate_gaf},
     {'type': 'RGFA', 'validator': validate_rgfa},
     {'type': 'GFA', 'validator': validate_gfa},
+    {'type': 'WIG', 'validator': validate_wig},
     {'type': 'JSON', 'validator': validate_json},
     {'type': 'CLUSTAL', 'validator': validate_clustal},
     {'type': 'SND', 'validator': validate_snd},
