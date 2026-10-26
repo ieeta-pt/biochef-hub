@@ -247,6 +247,33 @@ TYPE_DEFINITIONS = [
         "example": "H\tVN:Z:1.0\nS\ts1\tACGTACGTACGT\nS\ts2\tTTACGTACGTAC\nL\ts1\t+\ts2\t+\t4M\nP\tp1\ts1+,s2+\t*",
     },
     {
+        "id": "RGFA",
+        "input": True,
+        "output": True,
+        "example": (
+            "S\ts1\tACGTACGTAC\tSN:Z:seq\tSO:i:0\tSR:i:0\n"
+            "S\ts2\tGGGGGCCCCC\tSN:Z:seq\tSO:i:10\tSR:i:0\n"
+            "S\ts3\tTTTTTAAAAATT\tSN:Z:alt\tSO:i:0\tSR:i:1\n"
+            "S\ts4\tCATGCATGCA\tSN:Z:seq\tSO:i:20\tSR:i:0\n"
+            "L\ts1\t+\ts2\t+\t0M\tSR:i:0\n"
+            "L\ts2\t+\ts4\t+\t0M\tSR:i:0\n"
+            "L\ts1\t+\ts3\t+\t0M\tSR:i:1\n"
+            "L\ts3\t+\ts4\t+\t0M\tSR:i:1"
+        ),
+    },
+    {
+        "id": "GAF",
+        "input": True,
+        "output": True,
+        "example": "read1\t600\t153\t446\t+\t>s1>s2\t600\t153\t446\t293\t293\t60\nread1\t600\t10\t148\t+\t>s1\t300\t160\t298\t138\t138\t60",
+    },
+    {
+        "id": "WIG",
+        "input": True,
+        "output": True,
+        "example": "variableStep chrom=seq span=5\n1\t1.5\n11\t3",
+    },
+    {
         "id": "LIST",
         "input": True,
         "output": True,
