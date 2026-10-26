@@ -308,6 +308,22 @@ def validate_gfa(content):
             has_segment = True
     return has_segment
 
+def validate_rgfa(content):
+    # rGFA is GFA whose every segment carries its stable sequence (SN), its
+    # offset on it (SO) and its rank (SR), as minigraph writes them
+    if not validate_gfa(content):
+        return False
+    for line in content.strip().split('\n'):
+        fields = line.split('\t')
+        if fields[0] != 'S':
+            continue
+        tags = fields[3:]
+        if not (any(re.fullmatch(r'SN:Z:\S+', t) for t in tags)
+                and any(re.fullmatch(r'SO:i:\d+', t) for t in tags)
+                and any(re.fullmatch(r'SR:i:\d+', t) for t in tags)):
+            return False
+    return True
+
 def validate_list(content):
     if not content.strip(): 
         return False 
@@ -480,6 +496,7 @@ ALL_TYPES = [
     {'type': 'GTF', 'validator': validate_gtf},
     {'type': 'PAF', 'validator': validate_paf},
     {'type': 'GAF', 'validator': validate_gaf},
+    {'type': 'RGFA', 'validator': validate_rgfa},
     {'type': 'GFA', 'validator': validate_gfa},
     {'type': 'WIG', 'validator': validate_wig},
     {'type': 'JSON', 'validator': validate_json},
