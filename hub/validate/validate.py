@@ -122,14 +122,9 @@ def builder_source_errors(recipe: dict) -> list[str]:
     wasm = build.get("wasm") or {}
     if wasm.get("strategy") == "emscripten" and not source.get("repo"):
         errors.append("Emscripten builds currently require source.repo + source.commit")
-    # Patches apply to a checked-out tree. A url source is an archive that the
-    # build script unpacks, so there is nothing to patch when they would run;
     # biowasm applies its own patches, and `auto` may build through biowasm.
     if wasm.get("patches") and wasm.get("strategy") != "emscripten":
         errors.append("build.wasm.patches requires strategy emscripten")
-    for runtime in ("wasm", "native"):
-        if (build.get(runtime) or {}).get("patches") and not source.get("repo"):
-            errors.append(f"build.{runtime}.patches requires a git source (source.repo)")
     return errors
 
 schema = {

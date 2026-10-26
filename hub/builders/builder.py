@@ -100,7 +100,8 @@ def build_plugins(file_paths, build_dir, registry_dir):
                     recipe_dir,
                     recipe['build']["native"],
                     recipe["source"],
-                    output_dir=build_dir
+                    output_dir=build_dir,
+                    patches=recipe['build']["native"].get("patches"),
                 )
 
         for runtime in build_runtimes:

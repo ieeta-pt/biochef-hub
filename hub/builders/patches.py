@@ -1,3 +1,4 @@
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -25,6 +26,11 @@ def apply_patches(recipe_dir, patches, source_dir):
     tie the text to the digest without the recipe at hand.
     """
     applied = []
+    # A downloaded source is not a git checkout, but it sits inside one (the
+    # recipes checkout in CI). Without a ceiling git would find that repository
+    # and apply the patch relative to its root instead of to the source.
+    env = os.environ.copy()
+    env["GIT_CEILING_DIRECTORIES"] = str(Path(source_dir).resolve().parent)
     if patches and (Path(source_dir) / ".gitmodules").is_file():
         # A patch may change a file inside a submodule, which is empty until it
         # is initialised. Build scripts that need submodules initialise them
@@ -54,6 +60,7 @@ def apply_patches(recipe_dir, patches, source_dir):
                 cwd=source_dir,
                 capture_output=True,
                 text=True,
+                env=env,
             )
             if result.returncode:
                 raise RuntimeError(
