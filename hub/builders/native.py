@@ -20,6 +20,7 @@ from builders.container import (
     safe_child_path,
     safe_segment,
 )
+from builders.patches import apply_patches
 
 MAX_SOURCE_BYTES = 100 * 1024 * 1024
 BUILD_TOOLS = {
@@ -98,7 +99,7 @@ def download_source_file(source, source_dir):
     }
 
 
-def build(tool_name, recipe_dir, settings, source, output_dir="build", dependencies=None):
+def build(tool_name, recipe_dir, settings, source, output_dir="build", dependencies=None, patches=None):
     evidence = {
         "builder": "native",
         "source": {"declared": source},
@@ -131,14 +132,23 @@ def build(tool_name, recipe_dir, settings, source, output_dir="build", dependenc
                 )
             actual_source = None
             submodules = None
+            evidence["patches"] = apply_patches(recipe_dir, patches, source_dir)
         elif source.get("url"):
             source_dir.mkdir(parents=True)
             actual_source = download_source_file(source, source_dir)
             submodules = []
+            # Patches apply to the file as downloaded, which works for a plain
+            # source file. An archive is unpacked by the build script, so a
+            # patch for a file inside it does not apply and fails the build.
+            evidence["patches"] = apply_patches(recipe_dir, patches, source_dir)
         else:
             raise RuntimeError(
                 "Native builds require source.repo + source.commit or source.url + source.sha256"
             )
+
+        if actual_source and actual_source.get("kind") == "file":
+            source_file = source_dir / actual_source["files"][0]["path"]
+            patched_digest = file_digest(source_file)
 
         build_script = settings["buildScript"]
         recipe_script = safe_child_path(recipe_dir, build_script, "buildScript")
@@ -167,8 +177,9 @@ def build(tool_name, recipe_dir, settings, source, output_dir="build", dependenc
             raise RuntimeError("Native build script changed during the build")
 
         if actual_source and actual_source.get("kind") == "file":
-            source_file = source_dir / actual_source["files"][0]["path"]
-            if file_digest(source_file) != actual_source["files"][0]["digest"]:
+            # Compared with the file as the patches left it: the evidence keeps
+            # the downloaded digest, and the patches are recorded separately.
+            if file_digest(source_file) != patched_digest:
                 raise RuntimeError("Native source file changed during the build")
 
         output_name = settings.get("outputDir", ".")

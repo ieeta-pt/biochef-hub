@@ -98,6 +98,7 @@ def generate_bundle_sbom(bundle_path):
 
     runtime_refs = []
     for runtime, runtime_data in sorted((evidence.get("runtimes") or {}).items()):
+        pedigree = patch_pedigree((runtime_data.get("build") or {}).get("patches"))
         for item in (runtime_data.get("artifacts") or {}).get("files") or []:
             reference = add_file_component(
                 components,
@@ -108,6 +109,7 @@ def generate_bundle_sbom(bundle_path):
                 f"BioCHEF {runtime} runtime artifact",
                 expected_digest=item.get("digest"),
                 properties={"biochef.runtime": runtime},
+                pedigree=pedigree,
             )
             runtime_refs.append(reference)
 
@@ -230,6 +232,7 @@ def add_file_component(
     description,
     expected_digest=None,
     properties=None,
+    pedigree=None,
 ):
     path = require_file(bundle_dir, relative)
     digest = f"sha256:{sha256_hex(path)}"
@@ -246,10 +249,36 @@ def add_file_component(
         "hashes": [{"alg": "SHA-256", "content": digest[7:]}],
         "properties": properties_for_file(relative, path, properties),
     }
+    if pedigree:
+        component["pedigree"] = pedigree
     components.append(component)
     dependencies[root_ref].add(reference)
     dependencies.setdefault(reference, set())
     return reference
+
+
+def patch_pedigree(patches):
+    """The recipe patches a runtime was built with, as CycloneDX pedigree.
+
+    Recorded on that runtime's artifacts rather than on the upstream source
+    component: upstream is unchanged, and each runtime selects its own patches.
+    """
+    if not patches:
+        return None
+    return {
+        "patches": [
+            {
+                "type": "unofficial",
+                "diff": {
+                    "text": {
+                        "contentType": "text/x-diff",
+                        "content": item["content"],
+                    }
+                },
+            }
+            for item in patches
+        ]
+    }
 
 
 def add_source_component(components, evidence):
