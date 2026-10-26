@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
@@ -196,6 +197,46 @@ def check_bundle(bundle_path, summary):
             recipe.get("source") or {},
             summary,
             name,
+        )
+        check_patches(runtime, runtime_data, components, summary, name)
+
+
+def check_patches(runtime, runtime_data, components, summary, bundle_name):
+    """Ties each recorded patch to its digest, and to the SBOM's pedigree.
+
+    The text is part of the evidence, so the digest is checked against it here
+    without the recipe, and every artifact of the runtime must carry exactly
+    those diffs, in order, so the SBOM cannot omit or reorder a modification.
+    """
+    patches = (runtime_data.get("build") or {}).get("patches") or []
+    if not isinstance(patches, list):
+        fail(summary, bundle_name, "PATCH_IDENTITY", f"{runtime} patches are not a list")
+        return
+    for item in patches:
+        content = item.get("content") if isinstance(item, dict) else None
+        require(
+            summary,
+            bundle_name,
+            isinstance(content, str)
+            and safe_relative(item.get("path"))
+            and is_sha256_digest(item.get("digest"))
+            and item["digest"] == "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest(),
+            "PATCH_IDENTITY",
+            f"{runtime} patch does not match its digest: {item.get('path') if isinstance(item, dict) else item}",
+        )
+    expected = [item.get("content") for item in patches if isinstance(item, dict)]
+    for artifact in (runtime_data.get("artifacts") or {}).get("files") or []:
+        component = components.get(f"file:{artifact.get('path')}") or {}
+        recorded = [
+            ((patch.get("diff") or {}).get("text") or {}).get("content")
+            for patch in (component.get("pedigree") or {}).get("patches") or []
+        ]
+        require(
+            summary,
+            bundle_name,
+            recorded == expected,
+            "PATCH_SBOM",
+            f"SBOM pedigree of {artifact.get('path')} does not list the {runtime} patches",
         )
 
 
