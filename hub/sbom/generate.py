@@ -344,6 +344,11 @@ def add_dependency_component(components, item):
         component["externalReferences"] = [
             {"type": "vcs", "url": source["repo"]}
         ]
+    expression = ((item.get("license") or {}).get("spdx") or "").strip()
+    if expression:
+        component["licenses"] = [
+            {"expression": expression, "acknowledgement": "declared"}
+        ]
     components.append(component)
     return reference
 

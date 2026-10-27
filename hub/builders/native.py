@@ -8,6 +8,8 @@ from urllib.parse import urlparse
 import requests
 
 from builders.bundle_evidence import (
+    collect_declared_dependencies,
+    combine_dependencies,
     collect_git_dependencies,
     command_output,
     file_digest,
@@ -97,7 +99,7 @@ def download_source_file(source, source_dir):
     }
 
 
-def build(tool_name, recipe_dir, settings, source, output_dir="build", patches=None):
+def build(tool_name, recipe_dir, settings, source, output_dir="build", dependencies=None, patches=None):
     evidence = {
         "builder": "native",
         "source": {"declared": source},
@@ -129,12 +131,12 @@ def build(tool_name, recipe_dir, settings, source, output_dir="build", patches=N
                     check=True,
                 )
             actual_source = None
-            dependencies = None
+            submodules = None
             evidence["patches"] = apply_patches(recipe_dir, patches, source_dir)
         elif source.get("url"):
             source_dir.mkdir(parents=True)
             actual_source = download_source_file(source, source_dir)
-            dependencies = []
+            submodules = []
             # Patches apply to the file as downloaded, which works for a plain
             # source file. An archive is unpacked by the build script, so a
             # patch for a file inside it does not apply and fails the build.
@@ -202,9 +204,12 @@ def build(tool_name, recipe_dir, settings, source, output_dir="build", patches=N
                 tag=tag,
                 commit=commit,
             )["actual"]
-            dependencies = collect_git_dependencies(source_dir)
+            submodules = collect_git_dependencies(source_dir)
         evidence["source"]["actual"] = actual_source
-        evidence["dependencies"] = dependencies
+        evidence["dependencies"] = combine_dependencies(
+            submodules,
+            collect_declared_dependencies(source_dir, dependencies, "native"),
+        )
         return {
             "output_dir": str(destination),
             "source_dir": str(source_dir),
