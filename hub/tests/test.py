@@ -342,8 +342,8 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
                     print(f"[TODO] Unsupported output mode: {output_def}")
                     all_ok = False
                     continue
-                # Checked before detection: the TEXT validator accepts anything,
-                # so an empty TEXT output was not reported at all.
+                
+                # Check for empty output before type detection since TEXT accepts anything.
                 if not content.strip():
                     print(f"[WARNING] Empty output ({output_name}, {tool_bundle['name']}, {cmd})")
                     print("stderr:")
