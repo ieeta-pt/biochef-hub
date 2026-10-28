@@ -5,6 +5,8 @@ import re
 from pathlib import Path
 
 from builders.bundle_evidence import (
+    collect_declared_dependencies,
+    combine_dependencies,
     collect_git_dependencies,
     command_output,
     emsdk_commit,
@@ -12,6 +14,7 @@ from builders.bundle_evidence import (
     git_source_evidence,
 )
 from builders.container import safe_child_path
+from builders.patches import apply_patches
 
 
 def activate_emscripten_version(emscripten_version):
@@ -44,7 +47,7 @@ def activate_emscripten_version(emscripten_version):
     )
     return True
 
-def build(tool_name, recipe_dir, emscripten_settings, source, output_dir="build"):
+def build(tool_name, recipe_dir, emscripten_settings, source, output_dir="build", dependencies=None, patches=None):
     repo_url, tag, commit = source
     emscripten_version = emscripten_settings.get("emscriptenVersion")
     evidence = {
@@ -98,6 +101,7 @@ def build(tool_name, recipe_dir, emscripten_settings, source, output_dir="build"
                 ["git", "-C", str(source_dir), "checkout", f"tags/{tag}"],
                 check=True,
             )
+        evidence["patches"] = apply_patches(recipe_dir, patches, source_dir)
 
         build_script = emscripten_settings["buildScript"]
         recipe_script = safe_child_path(recipe_dir, build_script, "buildScript")
@@ -151,7 +155,10 @@ def build(tool_name, recipe_dir, emscripten_settings, source, output_dir="build"
             tag=tag,
             commit=commit,
         )
-        evidence["dependencies"] = collect_git_dependencies(source_dir)
+        evidence["dependencies"] = combine_dependencies(
+            collect_git_dependencies(source_dir),
+            collect_declared_dependencies(source_dir, dependencies, "wasm"),
+        )
         evidence["scripts"] = [
             {
                 "path": build_script,
