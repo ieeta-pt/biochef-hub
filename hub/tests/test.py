@@ -225,8 +225,10 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
                         continue
                     tool_input = example.rstrip("\n") + "\n"
 
-                elif input_def["mode"] == "file":
-                    file_name = f"input_{input_def['name']}.txt"
+                elif input_def["mode"] in ("file", "sidecar"):
+                    # A declared filename is the name the tool sees, as in the
+                    # app: a sidecar is found by it, next to the file it goes with.
+                    file_name = input_def.get("filename") or f"input_{input_def['name']}.txt"
                     file_path = tmp_path / file_name
 
                     if isinstance(example, bytes):
@@ -236,6 +238,10 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
                             f.write(example.rstrip("\n") + "\n")
 
                     input_files.append(file_name)
+
+                    # A sidecar is mounted, never placed on the command line.
+                    if input_def["mode"] == "sidecar":
+                        continue
 
                     if input_def.get("flag"):
                         cmd.append(input_def["flag"])
