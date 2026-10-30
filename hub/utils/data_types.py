@@ -477,6 +477,80 @@ def validate_newick(content):
             return False
     return trees > 0 and depth == 0 and not seen_node
 
+def validate_long_reads(content):
+    """Long reads in FASTA or FASTQ: one or more reads of unique names, each
+    of one or more letters, with as many qualities as bases in FASTQ"""
+    if not isinstance(content, str):
+        return False
+    lines = [line.rstrip('\r') for line in content.split('\n')]
+    names, i = set(), 0
+    while i < len(lines):
+        if not lines[i].strip():
+            i += 1
+            continue
+        header = lines[i]
+        fastq = header.startswith('@')
+        words = header[1:].split()
+        if header[0] not in '>@' or not words or words[0] in names:
+            return False
+        names.add(words[0])
+        i += 1
+        bases = 0
+        while i < len(lines) and not lines[i].startswith(('>', '@', '+') if fastq else ('>', '@')):
+            if lines[i] and not re.fullmatch(r'[A-Za-z]+', lines[i]):
+                return False
+            bases += len(lines[i])
+            i += 1
+        if not bases:
+            return False
+        if fastq:
+            if i == len(lines) or not lines[i].startswith('+'):
+                return False
+            i += 1
+            qualities = 0
+            while i < len(lines) and qualities < bases:
+                if not re.fullmatch(r'[\x21-\x7E]*', lines[i]):
+                    return False
+                qualities += len(lines[i])
+                i += 1
+            if qualities != bases:
+                return False
+    return bool(names)
+
+def validate_read_overlaps(content):
+    """Overlaps between reads in PAF: 12 or more tab-separated columns, with
+    each match within its reads, and the same length for a read throughout"""
+    if not isinstance(content, str):
+        return False
+    lengths, records = {}, 0
+    for line in content.split('\n'):
+        line = line.rstrip('\r')
+        if not line.strip():
+            continue
+        fields = line.split('\t')
+        if len(fields) < 12 or fields[4] not in ('+', '-'):
+            return False
+        if not all(re.fullmatch(r'[0-9]+', fields[i]) for i in (1, 2, 3, 6, 7, 8, 9, 10, 11)):
+            return False
+        ql, qs, qe, tl, ts, te, matches, block, mapq = (int(fields[i]) for i in (1, 2, 3, 6, 7, 8, 9, 10, 11))
+        if not (0 < ql and qs <= qe <= ql and 0 < tl and ts <= te <= tl and matches <= block and mapq <= 255):
+            return False
+        for name, length in ((fields[0], ql), (fields[5], tl)):
+            if not re.fullmatch(r'[\x21-\x7E]+', name) or lengths.setdefault(name, length) != length:
+                return False
+        records += 1
+    return records > 0
+
+def validate_eps(content):
+    """Encapsulated PostScript: the EPSF header, then a bounding box"""
+    if not isinstance(content, str):
+        return False
+    lines = content.split('\n')
+    if not re.fullmatch(r'%!PS-Adobe-[0-9.]+ EPSF-[0-9.]+\r?', lines[0]):
+        return False
+    number = r'\s+-?[0-9]+(?:\.[0-9]*)?(?:[eE][+-]?[0-9]+)?'
+    return any(re.fullmatch(r'%%BoundingBox:' + number * 4 + r'\s*', line) for line in lines[1:])
+
 ALL_TYPES = [
     {'type': 'FASTA', 'validator': validate_fasta},
     {'type': 'Multi-FASTA', 'validator': validate_multi_fasta},
@@ -504,6 +578,9 @@ ALL_TYPES = [
     {'type': 'SND', 'validator': validate_snd},
     {'type': 'FAI', 'validator': validate_fai},
     {'type': 'NEWICK', 'validator': validate_newick},
+    {'type': 'LONG_READS', 'validator': validate_long_reads},
+    {'type': 'READ_OVERLAPS', 'validator': validate_read_overlaps},
+    {'type': 'EPS', 'validator': validate_eps},
     {'type': 'TEXT', 'validator': lambda x: True},  # Default fallback
 ]
 
