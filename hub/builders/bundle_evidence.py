@@ -49,6 +49,18 @@ def git_output(arguments, cwd=None):
     return command_output(["git", *arguments], cwd=cwd)
 
 
+def source_date_epoch(source_dir):
+    """The committer time of the checked-out commit, for SOURCE_DATE_EPOCH.
+
+    gcc and clang take `__DATE__` and `__TIME__` from it instead of the clock,
+    and a build script can use it wherever it would stamp the time, so a
+    rebuild of the same commit gives the same bytes. None outside a git
+    checkout.
+    """
+    value = git_output(["-C", str(source_dir), "log", "-1", "--format=%ct"])
+    return value if value and value.isdigit() else None
+
+
 def emsdk_commit():
     directory = os.getenv("EMSDK")
     return git_output(["-C", directory, "rev-parse", "HEAD"]) if directory else None
