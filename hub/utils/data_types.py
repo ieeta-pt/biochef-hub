@@ -477,6 +477,43 @@ def validate_newick(content):
             return False
     return trees > 0 and depth == 0 and not seen_node
 
+def validate_maf(content):
+    """Multiple alignments in MAF: the ##maf header, then blocks of an a line
+    and s lines, each with its sequence's start, size, strand and length,
+    the size the bases in its text, and the texts of a block as long"""
+    if not isinstance(content, str):
+        return False
+    lines = [line.rstrip('\r') for line in content.split('\n')]
+    if not lines[0].startswith('##maf'):
+        return False
+    blocks, width = 0, None
+    for line in lines[1:]:
+        if not line.strip():
+            width = None
+            continue
+        if line.startswith('#'):
+            continue
+        fields = line.split()
+        if fields[0] == 'a':
+            blocks += 1
+            width = 0
+        elif width is None:
+            return False
+        elif fields[0] == 's':
+            if len(fields) != 7 or fields[4] not in ('+', '-'):
+                return False
+            if not all(re.fullmatch(r'[0-9]+', f) for f in (fields[2], fields[3], fields[5])):
+                return False
+            start, size, length, text = int(fields[2]), int(fields[3]), int(fields[5]), fields[6]
+            if start + size > length or len(text) - text.count('-') != size or not re.fullmatch(r'[A-Za-z.-]+', text):
+                return False
+            if width and len(text) != width:
+                return False
+            width = len(text)
+        elif fields[0] not in ('i', 'e', 'q'):
+            return False
+    return blocks > 0
+
 ALL_TYPES = [
     {'type': 'FASTA', 'validator': validate_fasta},
     {'type': 'Multi-FASTA', 'validator': validate_multi_fasta},
@@ -504,6 +541,7 @@ ALL_TYPES = [
     {'type': 'SND', 'validator': validate_snd},
     {'type': 'FAI', 'validator': validate_fai},
     {'type': 'NEWICK', 'validator': validate_newick},
+    {'type': 'MAF', 'validator': validate_maf},
     {'type': 'TEXT', 'validator': lambda x: True},  # Default fallback
 ]
 

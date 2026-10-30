@@ -289,6 +289,25 @@ TYPE_DEFINITIONS = [
             "((A:0.3,C:0.3)90:0.4,(B:0.3,D:0.3)90:0.4);"
         ),
     },
+    {
+        # Pairwise or multiple alignments in MAF, as PBSIM2 writes each
+        # simulated read against the reference; the example is two of its
+        # reads of the Multi-FASTA example's first sequence
+        "id": "MAF",
+        "input": True,
+        "output": True,
+        "example": (
+            "##maf version=1\n"
+            "\n"
+            "a\n"
+            "s seq1_human 0 89 + 100 TTGATCCTTAATTGCGGCTTCG--ATTACTAAAA-AA-CAGGG-AC-AG-CATCAACCAAA-CTGCTTACATTACT-GTC-GGC-GCAACAGCGCGGAAA\n"
+            "s S1_1  0 96 +  96 TT-A-CCTTAATTGCGGCTTCGATATTACTAAAAAAACCAGGGAACTAGCCATC-ACCAAAACTGCTTACATTACTGGTCG-GCGGCAACAGCGCGGAAA\n"
+            "\n"
+            "a\n"
+            "s seq1_human 2 98 + 100 GATCCT-TAATTGCGGCTTCGATTACTAAAAAAC-AGGGACAGCATCAACCAAACTGCTTACATTACTGTCGGCGCAACAGCGCGGAAACCGGTTGTTAA\n"
+            "s S1_2  0 91 -  91 G-TCCTTTAATTGCGGCTTCGATTACTAAAAAACAAGG-AC-GGA-CAACCAAACTGCTTACATTACTGTCGG-GCACCA-C-CGG-AACCGGT-GTTAA"
+        ),
+    },
 ]
 
 
