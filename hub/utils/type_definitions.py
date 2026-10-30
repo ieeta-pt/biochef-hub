@@ -289,6 +289,28 @@ TYPE_DEFINITIONS = [
             "((A:0.3,C:0.3)90:0.4,(B:0.3,D:0.3)90:0.4);"
         ),
     },
+    {
+        # cd-hit's .clstr file: the clusters and their members, with the
+        # identity of each to its cluster's representative (*)
+        "id": "CDHIT_CLSTR",
+        "input": True,
+        "output": True,
+        "example": (
+            ">Cluster 0\n"
+            "0\t316nt, >f1_s1... *\n"
+            "1\t315nt, >f1_s0... at +/96.19%\n"
+            "2\t309nt, >f1_s2... at -/95.15%\n"
+            ">Cluster 1\n"
+            "0\t298nt, >f2_s4... *"
+        ),
+    },
+    {
+        # A tar of FASTA or FASTQ files, such as cd-hit-div's parts
+        "id": "SEQUENCE_TAR",
+        "input": True,
+        "output": True,
+        "kind": "binary",
+    },
 ]
 
 
