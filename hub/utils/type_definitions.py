@@ -280,6 +280,81 @@ TYPE_DEFINITIONS = [
         "example": "seq\nseq1\nseq2",
     },
     {
+        # A Centrifuge index: a tar of ref.1.cf to ref.4.cf, the files
+        # centrifuge-build writes for a prefix.
+        "id": "CENTRIFUGE_INDEX",
+        "input": True,
+        "output": True,
+        "kind": "binary",
+        "example_file": "example.cf",
+    },
+    {
+        # The taxonomic ID of each sequence, by its name up to the first
+        # space: a sequence ID and a taxonomic ID per line, tab-separated, as
+        # Centrifuge's conversion table and Kraken 2's seqid2taxid.map.
+        "id": "TAXID_MAP",
+        "input": True,
+        "output": True,
+        "example": "seq\t562",
+    },
+    {
+        # NCBI's taxonomy tree, nodes.dmp: per line a taxonomic ID, its
+        # parent and its rank, then other fields, separated by "\t|\t".
+        "id": "NCBI_NODES",
+        "input": True,
+        "output": True,
+        "example": "1\t|\t1\t|\tno rank\t|\n2\t|\t1\t|\tsuperkingdom\t|\n562\t|\t2\t|\tspecies\t|",
+    },
+    {
+        # NCBI's taxon names, names.dmp: per line a taxonomic ID, a name, a
+        # unique form of it and its class, such as "scientific name",
+        # separated by "\t|\t".
+        "id": "NCBI_NAMES",
+        "input": True,
+        "output": False,
+        "example": (
+            "1\t|\troot\t|\t\t|\tscientific name\t|\n"
+            "2\t|\tBacteria\t|\tBacteria <bacteria>\t|\tscientific name\t|\n"
+            "562\t|\tEscherichia coli\t|\t\t|\tscientific name\t|"
+        ),
+    },
+    {
+        # A name per taxonomic ID: the ID and the name, tab-separated.
+        "id": "TAXID_NAMES",
+        "input": False,
+        "output": True,
+        "example": "1\troot\n2\tBacteria\n562\tEscherichia coli",
+    },
+    {
+        # A genome size per taxonomic ID: the ID and the size, tab-separated.
+        "id": "TAXID_SIZES",
+        "input": True,
+        "output": True,
+        "example": "562\t98",
+    },
+    {
+        # Centrifuge's classification of each read: a header naming the
+        # columns, then a line per read and taxon, tab-separated.
+        "id": "CENTRIFUGE_CLASSIFICATION",
+        "input": True,
+        "output": True,
+        "example": (
+            "readID\tseqID\ttaxID\tscore\t2ndBestScore\thitLength\tqueryLength\tnumMatches\n"
+            "read1\tseq\t562\t4225\t0\t80\t80\t1"
+        ),
+    },
+    {
+        # Centrifuge's report: per taxon its name, ID, rank, genome size,
+        # reads, reads assigned to it alone, and abundance.
+        "id": "CENTRIFUGE_REPORT",
+        "input": True,
+        "output": True,
+        "example": (
+            "name\ttaxID\ttaxRank\tgenomeSize\tnumReads\tnumUniqueReads\tabundance\n"
+            "Escherichia coli\t562\tspecies\t98\t3\t3\t1"
+        ),
+    },
+    {
         "id": "NEWICK",
         "input": True,
         "output": True,
