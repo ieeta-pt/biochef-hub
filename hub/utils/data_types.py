@@ -413,6 +413,50 @@ def validate_fai(content):
 
     return True
 
+MAFFT_NUMBER = r'[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?'
+
+def mafft_body(content, kind):
+    """The MAFFT operations pass their distances (hat2) and local alignments
+    (hat3) on with a first line naming the sequences they were computed from.
+    Returns the lines after it, or None without it."""
+    lines = content.strip('\n').split('\n')
+    if not re.fullmatch(rf'# BioChef MAFFT {kind} of \d+ sequences, signature [0-9a-f]{{16}}', lines[0]):
+        return None
+    return lines[1:]
+
+def validate_mafft_hat2(content):
+    """Distances: the number of sequences, their names, then the upper
+    triangle of the matrix, or only its rows for the sequences being added
+    to an alignment. Nothing after the first line when MAFFT wrote none."""
+    body = mafft_body(content, 'hat2')
+    if body is None:
+        return False
+    if not body:
+        return True
+    if len(body) < 3 or not re.fullmatch(r'\s*\d+', body[0]) or not re.fullmatch(r'\s*\d+', body[1]):
+        return False
+    n = int(body[1])
+    if n < 1 or len(body) < 3 + n or not re.fullmatch(r'\s*' + MAFFT_NUMBER, body[2]):
+        return False
+    if not all(re.fullmatch(rf'\s*{i + 1}\. =.+', line) for i, line in enumerate(body[3:3 + n])):
+        return False
+    values = ' '.join(body[3 + n:]).split()
+    return len(values) <= n * (n - 1) // 2 and all(re.fullmatch(MAFFT_NUMBER, v) for v in values)
+
+def validate_mafft_hat3(content):
+    """Local alignments, one per line: the two sequences, the overlap, the
+    score, the region in each sequence and a tag."""
+    body = mafft_body(content, 'hat3')
+    if body is None:
+        return False
+    line = rf'\d+ \d+ -?\d+ {MAFFT_NUMBER} -?\d+ -?\d+ -?\d+ -?\d+ \S+'
+    return all(re.fullmatch(line, l.strip()) for l in body if l.strip())
+
+def validate_mafft_dist(content):
+    """mafft-distance: one pair of sequences per line, "i-j d=distance l=length_i,length_j"."""
+    lines = content.strip().split('\n')
+    return bool(content.strip()) and all(re.fullmatch(r'\d+-\d+ d=' + MAFFT_NUMBER + r' l=\d+,\d+', l.strip()) for l in lines)
+
 def validate_newick(content):
     """Check ordinary Newick syntax, including multiple trees and comments."""
 
@@ -491,6 +535,9 @@ ALL_TYPES = [
     {'type': 'VCF', 'validator': validate_vcf},
     {'type': 'SAM', 'validator': validate_sam},
     {'type': 'BED', 'validator': validate_bed},
+    {'type': 'MAFFT_HAT2', 'validator': validate_mafft_hat2},
+    {'type': 'MAFFT_HAT3', 'validator': validate_mafft_hat3},
+    {'type': 'MAFFT_DIST', 'validator': validate_mafft_dist},
     {'type': 'LIST', 'validator': validate_list},
     {'type': 'GFF', 'validator': validate_gff},
     {'type': 'GTF', 'validator': validate_gtf},

@@ -289,6 +289,51 @@ TYPE_DEFINITIONS = [
             "((A:0.3,C:0.3)90:0.4,(B:0.3,D:0.3)90:0.4);"
         ),
     },
+    {
+        "id": "MAFFT_HAT2",
+        "input": True,
+        "output": True,
+        "example": (
+            '# BioChef MAFFT hat2 of 4 sequences, signature 106302acc21db7fd\n'
+            '    1\n'
+            '    4\n'
+            '  2.082\n'
+            '   1. =seq1_human\n'
+            '   2. =seq2_cat\n'
+            '   3. =seq3_mouse\n'
+            '   4. =seq4_dog\n'
+            ' 0.265 0.833 0.815\n'
+            ' 0.727 0.727\n'
+            ' 0.319'
+        ),
+    },
+    {
+        "id": "MAFFT_HAT3",
+        "input": True,
+        "output": True,
+        "example": (
+            '# BioChef MAFFT hat3 of 4 sequences, signature 106302acc21db7fd\n'
+            '0 1 100 4.53560 0 99 0 99 h\n'
+            '0 2 100 3.05235 0 99 0 99 h\n'
+            '0 3 100 3.09797 0 99 0 99 h\n'
+            '1 2 100 3.32804 0 99 0 99 h\n'
+            '1 3 100 3.32804 0 99 0 99 h\n'
+            '2 3 100 4.39679 0 99 0 99 h'
+        ),
+    },
+    {
+        "id": "MAFFT_DIST",
+        "input": True,
+        "output": True,
+        "example": (
+            '1-2 d=0.50 l=100,100\n'
+            '1-3 d=0.85 l=100,100\n'
+            '1-4 d=0.86 l=100,100\n'
+            '2-3 d=0.84 l=100,100\n'
+            '2-4 d=0.78 l=100,100\n'
+            '3-4 d=0.50 l=100,100'
+        ),
+    },
 ]
 
 
