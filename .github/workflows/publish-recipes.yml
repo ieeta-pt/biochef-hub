@@ -654,7 +654,8 @@ jobs:
           cosign sign --yes "$CATALOG_DIGEST_REF"
           CERTIFICATE_IDENTITY="$(python -c 'import json, sys; print(json.load(open(sys.argv[1]))["certificate_identity"])' "$SIGNING_POLICY")"
           CERTIFICATE_ISSUER="$(python -c 'import json, sys; print(json.load(open(sys.argv[1]))["certificate_oidc_issuer"])' "$SIGNING_POLICY")"
-          cosign verify \
+          cosign verify-attestation \
+            --type https://sigstore.dev/cosign/sign/v1 \
             --certificate-identity "$CERTIFICATE_IDENTITY" \
             --certificate-oidc-issuer "$CERTIFICATE_ISSUER" \
             "$CATALOG_DIGEST_REF"
