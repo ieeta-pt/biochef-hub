@@ -18,8 +18,8 @@ jobs:
       contents: read
     env:
       REGISTRY_DIR: registry
-      EMSDK_VERSION: "4.0.18"
-      EMSDK_COMMIT: "eb5eb4b3b2b792f44ded198bfe615c985da5be2c"
+      EMSDK_VERSION: "6.0.13"
+      EMSDK_COMMIT: "35659964bc2762fffec0d257997fb61475f765b7"
 
     steps:
       - name: Checkout caller recipes
