@@ -42,7 +42,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     env:
@@ -145,7 +145,7 @@ jobs:
   publish:
     if: inputs.publish
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       slsa_subjects_handle: ${{ steps.slsa_subjects.outputs.handle }}
     concurrency:
@@ -299,7 +299,7 @@ jobs:
   verify_and_distribute_slsa_provenance:
     if: inputs.publish
     needs: [build, publish, slsa_provenance]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     concurrency:
       group: biochef-catalog-${{ inputs.registry_url }}-${{ inputs.package_prefix }}
       cancel-in-progress: false
