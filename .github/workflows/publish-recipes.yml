@@ -42,13 +42,13 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     env:
       REGISTRY_DIR: registry
-      EMSDK_VERSION: "4.0.18"
-      EMSDK_COMMIT: "eb5eb4b3b2b792f44ded198bfe615c985da5be2c"
+      EMSDK_VERSION: "6.0.13"
+      EMSDK_COMMIT: "35659964bc2762fffec0d257997fb61475f765b7"
       BIOCHEF_BIOWASM_BUILDER_IMAGE: ${{ inputs.biowasm_builder_image }}
 
     steps:
@@ -145,7 +145,7 @@ jobs:
   publish:
     if: inputs.publish
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       slsa_subjects_handle: ${{ steps.slsa_subjects.outputs.handle }}
     concurrency:
@@ -299,7 +299,7 @@ jobs:
   verify_and_distribute_slsa_provenance:
     if: inputs.publish
     needs: [build, publish, slsa_provenance]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     concurrency:
       group: biochef-catalog-${{ inputs.registry_url }}-${{ inputs.package_prefix }}
       cancel-in-progress: false
@@ -654,7 +654,8 @@ jobs:
           cosign sign --yes "$CATALOG_DIGEST_REF"
           CERTIFICATE_IDENTITY="$(python -c 'import json, sys; print(json.load(open(sys.argv[1]))["certificate_identity"])' "$SIGNING_POLICY")"
           CERTIFICATE_ISSUER="$(python -c 'import json, sys; print(json.load(open(sys.argv[1]))["certificate_oidc_issuer"])' "$SIGNING_POLICY")"
-          cosign verify \
+          cosign verify-attestation \
+            --type https://sigstore.dev/cosign/sign/v1 \
             --certificate-identity "$CERTIFICATE_IDENTITY" \
             --certificate-oidc-issuer "$CERTIFICATE_ISSUER" \
             "$CATALOG_DIGEST_REF"

@@ -11,6 +11,7 @@ from publish.publish import read_publish_results
 
 
 CYCLONEDX_PREDICATE_TYPE = "https://cyclonedx.org/bom"
+SIGNATURE_PREDICATE_TYPE = "https://sigstore.dev/cosign/sign/v1"
 IN_TOTO_STATEMENT_TYPES = frozenset(
     {
         "https://in-toto.io/Statement/v0.1",
@@ -85,7 +86,14 @@ def verify_cosign_signature(digest_reference, policy_path, cosign_bin="cosign"):
     policy = load_policy(policy_path)
     summary = VerificationSummary(scanned=1)
     run_cosign(
-        [cosign_bin, "verify", *identity_args(policy), digest_reference],
+        [
+            cosign_bin,
+            "verify-attestation",
+            "--type",
+            SIGNATURE_PREDICATE_TYPE,
+            *identity_args(policy),
+            digest_reference,
+        ],
         summary,
         digest_reference,
         "SIGNATURE_VERIFY_FAILED",
@@ -240,7 +248,14 @@ def verify_artifact(
     reference = artifact["digest_reference"]
     args = identity_args(policy)
     run_cosign(
-        [cosign_bin, "verify", *args, reference],
+        [
+            cosign_bin,
+            "verify-attestation",
+            "--type",
+            SIGNATURE_PREDICATE_TYPE,
+            *args,
+            reference,
+        ],
         summary,
         name,
         "SIGNATURE_VERIFY_FAILED",
