@@ -8,7 +8,7 @@ from pathlib import Path
 import random
 import string
 
-from utils.data_types import detect_data_type, detect_binary_type, BINARY_VALIDATORS
+from utils.data_types import detect_data_type, detect_binary_type, bgzf_inflate, BINARY_VALIDATORS
 from utils.type_definitions import get_example_inputs, is_binary_type
 
 seed = random.randint(0, 10_000)
@@ -156,6 +156,7 @@ def run_wasm_tool(wasm_path, argv, tool_input, input_files, tmp_path):
     # path treats it, since some tools exit non-zero by design.
     if run.get("exitCode"):
         print(f"[WARNING] Tool exited with status {run['exitCode']}")
+        print(safe(run.get("stderr")).strip()[:600])
 
     return run.get("stdout", ""), run.get("stderr", "")
 
@@ -296,6 +297,7 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
                     return False
                 if result.returncode:
                     print(f"[WARNING] Tool exited with status {result.returncode}")
+                    print(safe(stderr).strip()[:600])
 
             all_ok = True
 
@@ -325,6 +327,12 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
                     binary_types = [t for t in output_def["types"] if is_binary_type(t)]
                     if binary_types:
                         data = matched.read_bytes()
+                        # A BGZF file with nothing inside, the end-of-file block
+                        # a tool writes before it fails, is as empty as a text
+                        # output with nothing in it.
+                        if not data or bgzf_inflate(data) == (b"", True):
+                            print(f"[WARNING] Empty output ({output_name}, {tool_bundle['name']}, {cmd})")
+                            continue
                         detected = detect_binary_type(data, binary_types)
                         if detected in binary_types:
                             continue
@@ -332,9 +340,6 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
                             print(f"[INFO] Binary output found ({output_name}); format not checked")
                             continue
                         if len(binary_types) == len(output_def["types"]):
-                            if not data:
-                                print(f"[WARNING] Empty output ({output_name}, {tool_bundle['name']}, {cmd})")
-                                continue
                             print(f"[ERROR] Unexpected output type ({output_name}, {tool_bundle['name']}, {cmd})")
                             print(f"  Detected : {detected or 'UNKNOWN'}")
                             print(f"  Expected : {output_def['types']}")
@@ -353,10 +358,17 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
                     print(f"[TODO] Unsupported output mode: {output_def}")
                     all_ok = False
                     continue
+                
+                # Check for empty output before type detection since TEXT accepts anything.
+                if not content.strip():
+                    print(f"[WARNING] Empty output ({output_name}, {tool_bundle['name']}, {cmd})")
+                    print("stderr:")
+                    print(safe(stderr).strip())
+                    continue
                 detected = detect_data_type(content, output_def["types"])
 
                 if not detected:
-                    print(f"[WARNING] Empty output ({output_name}, {tool_bundle['name']}, {cmd})")
+                    print(f"[WARNING] Output matches none of its declared types ({output_name}, {tool_bundle['name']}, {cmd})")
                     print("stderr:")
                     print(safe(stderr).strip())
                 elif detected not in output_def["types"]:
