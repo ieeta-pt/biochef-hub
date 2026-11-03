@@ -55,7 +55,7 @@ def validate_rna(content):
     return bool(re.fullmatch(r'[ACGUN]+', content.strip(), re.I))
 
 def validate_amino_acids(content):
-    return bool(re.fullmatch(r'[ACDEFGHIKLMNPQRSTUVWY-]+', content.strip()))
+    return bool(re.fullmatch(r'[ACDEFGHIKLMNPQRSTUVWY-]+', content.strip(), re.I))
 
 def validate_num(content):
     lines = content.strip().split('\n')
