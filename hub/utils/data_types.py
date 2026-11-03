@@ -69,6 +69,21 @@ def validate_packaged_fastq(content):
     # TODO:
     return False
 
+def validate_gto_headers(content):
+    # gto_fasta_split_streams' headers channel: the text of each FASTA header
+    # after its '>', one per line
+    if not content or not content.strip('\n'):
+        return False
+    return '\x00' not in content and '\x01' not in content
+
+def validate_gto_extra(content):
+    # gto_fasta_split_streams' extra channel: a '>' where each record starts,
+    # a 0x00 for each base in ACGT and a 0x01 for each in acgt, and every other
+    # character as it was, so the bases themselves never appear in it
+    if not content:
+        return False
+    return ('\x00' in content or '\x01' in content) and not re.search(r'[ACGTacgt]', content)
+
 def validate_vcf(content):
     if not content:
         return False
@@ -491,6 +506,7 @@ ALL_TYPES = [
     {'type': 'VCF', 'validator': validate_vcf},
     {'type': 'SAM', 'validator': validate_sam},
     {'type': 'BED', 'validator': validate_bed},
+    {'type': 'GTO_EXTRA', 'validator': validate_gto_extra},
     {'type': 'LIST', 'validator': validate_list},
     {'type': 'GFF', 'validator': validate_gff},
     {'type': 'GTF', 'validator': validate_gtf},
@@ -504,6 +520,9 @@ ALL_TYPES = [
     {'type': 'SND', 'validator': validate_snd},
     {'type': 'FAI', 'validator': validate_fai},
     {'type': 'NEWICK', 'validator': validate_newick},
+    # Any lines of text are headers, so it is only chosen where headers are
+    # expected
+    {'type': 'GTO_HEADERS', 'validator': validate_gto_headers, 'only_when_expected': True},
     {'type': 'TEXT', 'validator': lambda x: True},  # Default fallback
 ]
 
@@ -518,7 +537,7 @@ def detect_data_type(data, expected=[]):
 
     # Then check remaining types
     for type_info in ALL_TYPES:
-        if type_info['type'] == 'TEXT': continue
+        if type_info['type'] == 'TEXT' or type_info.get('only_when_expected'): continue
         if type_info['type'] not in expected and type_info['validator'](data):
             return type_info['type']
 
