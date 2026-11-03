@@ -134,6 +134,25 @@ def validate_sam(content):
 
     return True
 
+def validate_pos(content):
+    # gto_comparative_map's positions file: a "#SCF" line with the number of
+    # bases of the target and of the reference, then one line per region, a
+    # name and four positions in the target and a name and four positions in
+    # the reference, separated by whitespace
+    lines = content.strip().split('\n')
+    header = lines[0].split()
+    if len(header) != 3 or not header[0].startswith('#SCF'):
+        return False
+    if not all(re.fullmatch(r'-?\d+', f) for f in header[1:]):
+        return False
+    for line in lines[1:]:
+        fields = line.split()
+        if len(fields) != 10:
+            return False
+        if not all(re.fullmatch(r'-?\d+', f) for f in fields[1:5] + fields[6:10]):
+            return False
+    return True
+
 def validate_bed(content):
     if not content:
         return False
@@ -490,6 +509,7 @@ ALL_TYPES = [
     {'type': 'AminoAcids', 'validator': validate_amino_acids},
     {'type': 'VCF', 'validator': validate_vcf},
     {'type': 'SAM', 'validator': validate_sam},
+    {'type': 'POS', 'validator': validate_pos},
     {'type': 'BED', 'validator': validate_bed},
     {'type': 'LIST', 'validator': validate_list},
     {'type': 'GFF', 'validator': validate_gff},
