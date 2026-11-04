@@ -198,6 +198,16 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
                 if not parameter.get("required"):
                     continue
 
+                # A flag ending in "=" (-chrom=) takes its value in the same
+                # argument, as the app and the agent pass it.
+                flag = parameter.get("flag") or ""
+                if flag.endswith("=") and parameter.get("type") != "flag":
+                    value = parameter.get("default")
+                    if value is None:
+                        value = example_param_values.get(parameter.get("type"), "")
+                    cmd.append(f"{flag}{value}")
+                    continue
+
                 if parameter.get("flag"):
                     cmd.append(parameter["flag"])
 
