@@ -1,174 +1,159 @@
 # BioChef Hub
 
-Build-and-publish system for BioChef. Validates recipes from `biochef-recipes`, compiles to **WASM** (biowasm/emscripten) and/or **native tarball** or **WES**, runs tiny tests, generates **SBOM** and **SLSA**, signs with **cosign**, and publishes signed bundles to the **BioChef Registry**.
+The build and publish system for BioChef. A Python command line tool and two reusable GitHub Actions workflows take recipes from [biochef-recipes](https://github.com/ieeta-pt/biochef-recipes), build and test them, and publish the resulting tool bundles to an OCI registry together with a signed catalog.
+
+
+## Role in BioChef
+
+| Repository | Role |
+| --- | --- |
+| [biochef-app](https://github.com/ieeta-pt/biochef-app) | Web application. Reads the signed catalog and loads tools from the registry. |
+| biochef-hub (this repository) | Validates, builds, tests, signs and publishes recipes. |
+| [biochef-recipes](https://github.com/ieeta-pt/biochef-recipes) | The recipes, one `biochef.yaml` per tool. Its workflows call the workflows in this repository. |
+| [biochef-agent](https://github.com/ieeta-pt/biochef-agent) | Execution service that runs BioChef workflows outside the browser, using tools from the registry. |
 
 
 ## How it works
 
-1. A PR in `biochef-recipes` adds a `biochef.yaml` and tiny tests.
-2. The recipes repo **uses** this repo’s reusable GitHub Actions workflow.
-3. Hub validates, builds, tests, creates SBOM/SLSA, signs, and **publishes** to the Registry.
-4. Hub updates the signed `index.json`.
+The workflows in `.github/workflows` are called by biochef-recipes and run `hub/hub.py`.
 
-> Reusable workflows run in the **caller** workspace. This workflow checks out the Hub source to build the CLI before use.
+`validate-recipes.yml` runs on recipe pull requests:
+
+1. `validate` checks each recipe.
+2. `build` builds it.
+3. `test` runs the built tools.
+4. `sbom` and `sbom-check` generate and check a CycloneDX SBOM for each bundle.
+
+`publish-recipes.yml` runs on recipe changes on master:
+
+1. `validate`, `build`, `sbom` and `sbom-check`, as above, without `test`.
+2. `publish` pushes each bundle to the registry and records its digest.
+3. `sign-attest` signs each bundle by digest with Cosign and attaches its SBOM as an attestation. `verify-attestations` then checks the signatures and attestations against a signing policy.
+4. A SLSA provenance job generates provenance for the published digests, which is verified with `slsa-verifier` and attached to each bundle.
+5. When `publish_catalog` is true, `publish-catalog` writes a catalog of the verified bundles, signs it with an ES256 key, and pushes it to the registry. The catalog is then signed with Cosign.
 
 
 ## Repository layout
 
 ```
-biochef-hub/
-├─ cmd/hub/                      # CLI: build | test | sbom | attest | publish | index
-├─ internal/
-│  ├─ builders/                  # biowasm, biowasm-fork, emscripten, native
-│  ├─ packagers/                 # wasm, oci, native-tar, wes
-│  ├─ sign/                      # cosign + SRI
-│  ├─ publish/                   # upload + index signer
-│  ├─ provenance/                # SLSA attestation
-│  └─ spec/                      # biochef.yaml validation
-├─ docker/                       # Builder images
-│  ├─ builder.Dockerfile
-│  └─ emscripten.Dockerfile
-├─ .github/workflows/
-│  └─ build-recipe.yml           # reusable workflow
-├─ templates/
-│  ├─ recipe/biochef.yaml        # sample recipe
-│  └─ ci/recipes.workflow.yml    # sample caller workflow
-└─ README.md
+hub/
+  hub.py              CLI entry point
+  requirements.txt    Python dependencies
+  example.env         Template for registry credentials
+  builders/           Build recipes: biowasm, emscripten and native
+  catalog/            Generate, sign and publish the catalog
+  publish/            Push bundles to the registry
+  sbom/               Generate and check CycloneDX SBOMs
+  signing/            Sign and verify with Cosign
+  tests/              Run built tools and check their outputs
+  utils/              Data type definitions, validators and example files
+  validate/           Recipe schema validation
+docs/
+  adding-data-types.md
+.github/workflows/
+  publish-recipes.yml
+  validate-recipes.yml
 ```
 
+`build.wasm.strategy` in a recipe selects the WebAssembly builder. `biowasm` builds inside a Docker image defined by `hub/builders/biowasm.Dockerfile` and `biowasm-builder.lock.json`, `emscripten` runs the recipe's build script with the Emscripten SDK, and `auto` tries biowasm and falls back to emscripten. `build.native` builds a native binary.
 
-## Reusable workflow (called by `biochef-recipes`)
-
-```yaml
-# biochef-hub/.github/workflows/build-recipe.yml
-name: Build BioChef Recipe
-on:
-  workflow_call:
-    inputs:
-      registry_url:
-        required: true
-        type: string
-    secrets:
-      COSIGN_KEY: { required: true }                       # if using key-based signing
-      REGISTRY_S3_ACCESS_KEY_ID: { required: true }
-      REGISTRY_S3_SECRET_ACCESS_KEY: { required: true }
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write   # needed if you switch to keyless OIDC signing
-      contents: read
-    steps:
-      # 1) Checkout caller (biochef-recipes)
-      - uses: actions/checkout@v4
-
-      # 2) Checkout Hub source into .hub/
-      - uses: actions/checkout@v4
-        with:
-          repository: biochef-org/biochef-hub
-          path: .hub
-
-      # 3) Build Hub CLI
-      - uses: actions/setup-go@v5
-        with: { go-version: '1.22.x' }
-      - run: go build -o hub ./.hub/cmd/hub
-
-      # (Optional) Node validator if kept separate from CLI
-      # - uses: actions/setup-node@v4
-      # - run: npx biochef-validate ./**/biochef.yaml
-
-      # 4) Validate, build, test
-      - run: ./hub validate ./**/biochef.yaml
-      - run: ./hub build
-      - run: ./hub test --golden ./tests
-
-      # 5) SBOM + SLSA
-      - run: ./hub sbom && ./hub attest
-
-      # 6) Install cosign (required for signing)
-      - uses: sigstore/cosign-installer@v3
-
-      # 7) Sign bundle (key-based; for keyless, omit --key and ensure id-token: write)
-      - env: { COSIGN_PASSWORD: "" }
-        run: ./hub sign --key "${{ secrets.COSIGN_KEY }}"
-
-      # 8) Publish to Registry and update signed index
-      - env:
-          REGISTRY_URL: ${{ inputs.registry_url }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.REGISTRY_S3_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.REGISTRY_S3_SECRET_ACCESS_KEY }}
-        run: ./hub publish --registry "$REGISTRY_URL"
-      - run: ./hub index --sign
-```
-
-**Caller example in `biochef-recipes`**
-
-```yaml
-# biochef-recipes/.github/workflows/recipes.yml
-name: Recipes CI
-on: [pull_request, push]
-jobs:
-  build_recipe:
-    uses: biochef-org/biochef-hub/.github/workflows/build-recipe.yml@main
-    with:
-      registry_url: s3://registry.biochef.org/
-    secrets: inherit
-```
-
-> Alternative: use a container image `ghcr.io/biochef-org/hub:latest` with the CLI preinstalled to simplify the job.
-
-
-## Build strategies
-
-* **WASM**: `strategy: auto` tries **biowasm** first; fallback **emscripten** is defined in the recipe.
-* **Local**: either `native/<os-arch>.tar.zst` or OCI image by digest.
-* **Remote**: WES/TES via `wdl|cwl|nf`.
-* **Federated**: `runtime/federated/*` for trainers/adapters.
-
-
-## Secrets
-
-* `COSIGN_KEY` for signing (omit for keyless OIDC).
-* Registry credentials (S3/GCS).
-* Optional GHCR creds if pushing images.
-
-
-## Security
-
-* **Signing**: Sigstore **cosign** for bundles and `index.json`.
-* **Provenance**: **SLSA** attestations.
-* **Licensing**: **SPDX** checks.
-* **Integrity**: **SRI** hashes verified by clients.
-
-**References**
-
-* Cosign docs: [https://docs.sigstore.dev/cosign/](https://docs.sigstore.dev/cosign/) ([Sigstore][1])
-* Cosign quickstart (sign/verify): [https://docs.sigstore.dev/quickstart/quickstart-cosign/](https://docs.sigstore.dev/quickstart/quickstart-cosign/) ([Sigstore][2])
-* Cosign installer GitHub Action: [https://github.com/sigstore/cosign-installer](https://github.com/sigstore/cosign-installer) ([GitHub][3])
-* OIDC in Fulcio (GitHub Actions id-token, issuer values): [https://docs.sigstore.dev/certificate_authority/oidc-in-fulcio/](https://docs.sigstore.dev/certificate_authority/oidc-in-fulcio/) ([Sigstore][4])
-* GitHub reusable workflows: [https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows) ([GitHub Docs][5])
-* SLSA spec: [https://slsa.dev/](https://slsa.dev/) and [https://slsa.dev/spec/v1.0/about](https://slsa.dev/spec/v1.0/about) ([SLSA][6])
-* SPDX: [https://spdx.dev/](https://spdx.dev/) and License list [https://spdx.org/licenses/](https://spdx.org/licenses/) ([spdx.dev][7])
-* MDN SRI: [https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity](https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity) ([developer.mozilla.org][8])
-* GA4GH WES: [https://github.com/ga4gh/workflow-execution-service-schemas](https://github.com/ga4gh/workflow-execution-service-schemas) and docs [https://ga4gh.github.io/workflow-execution-service-schemas/docs/](https://ga4gh.github.io/workflow-execution-service-schemas/docs/) ([GitHub][9])
-* GA4GH TES: [https://github.com/ga4gh/task-execution-schemas](https://github.com/ga4gh/task-execution-schemas) and docs [https://ga4gh.github.io/task-execution-schemas/docs/](https://ga4gh.github.io/task-execution-schemas/docs/) ([GitHub][10])
+To add a data type, see [docs/adding-data-types.md](docs/adding-data-types.md).
 
 
 ## Local development
 
-```bash
-# build CLI
-go build -o bin/hub ./cmd/hub
-# run without installing
-go run ./cmd/hub --help
+Requirements:
 
-# typical tasks
-bin/hub validate ./**/biochef.yaml
-bin/hub build
-bin/hub test --golden ./tests
-bin/hub sbom && bin/hub attest
+- Python 3.12. `hub/builders/builder.py` does not parse on 3.11.
+- Docker, for the biowasm strategy.
+- The Emscripten SDK, for the emscripten strategy. The `EMSDK` environment variable points to it and defaults to `/opt/emsdk`.
+- Node.js, for `test` on WebAssembly tools.
+- Cosign, for `sign-attest` and `verify-attestations`.
+
+Set up a virtual environment:
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r hub/requirements.txt
 ```
+
+Run the CLI:
+
+```bash
+python hub/hub.py --help
+python hub/hub.py validate ../biochef-recipes/recipes/edlib/biochef.yaml
+python hub/hub.py build
+python hub/hub.py test
+python hub/hub.py sbom
+python hub/hub.py sbom-check
+```
+
+Commands work in the current directory. `validate` writes the list of valid recipes to `.build`, `build` reads it, and bundles go to `registry/`. `build` deletes any existing `registry/` first.
+
+To build and publish a recipe to a local registry with only Docker installed, use `scripts/publish-local-recipe.sh` in biochef-app. It runs the hub in the Docker image defined by `Dockerfile.hub.dev`. See the [biochef-app README](https://github.com/ieeta-pt/biochef-app#run-with-a-local-registry).
+
+
+## CLI
+
+Run `python hub/hub.py <command> --help` for all options.
+
+| Command | Purpose |
+| --- | --- |
+| `validate PATH [PATH ...]` | Validate recipes and the data type examples. |
+| `build` | Build the recipes recorded by `validate`. |
+| `test` | Run the tools in `registry/` and check their outputs. |
+| `sbom` | Generate an SBOM for each bundle. |
+| `sbom-check` | Check the SBOM evidence of each bundle. |
+| `publish --registry REGISTRY` | Push bundles and write `publish-results.json`. |
+| `sign-attest --policy FILE --expected-hub-commit SHA` | Sign and attest published bundles with Cosign. |
+| `verify-attestations --policy FILE --expected-hub-commit SHA` | Verify published signatures and attestations. |
+| `publish-catalog --registry REGISTRY --policy FILE --slsa-verification-report FILE` | Generate, sign and publish the catalog. |
+| `index` | Does nothing. |
+
+`publish` needs no credentials for `localhost` or `127.0.0.1`. For any other registry it reads these from the environment, or from a `.env` file such as a copy of `hub/example.env` saved as `hub/.env`:
+
+| Variable | Purpose |
+| --- | --- |
+| `REGISTRY_USERNAME` | Registry user. Required. |
+| `REGISTRY_PASSWORD` | Registry password or token. Required. |
+| `ORAS_AUTH_BACKEND` | ORAS auth backend, for example `token`. Required. |
+| `ORAS_INSECURE` | Set to `true` for an insecure connection. Optional. |
+
+`BIOCHEF_BIOWASM_BUILDER_IMAGE` selects a prebuilt biowasm image by digest. Without it the image is built locally if it is not already present.
+
+
+## Reusable workflows
+
+`validate-recipes.yml` inputs:
+
+| Input | Required | Default | Purpose |
+| --- | --- | --- | --- |
+| `recipes` | yes | | Space-separated recipe paths. |
+| `hub_ref` | no | `master` | Hub ref to check out. |
+
+`publish-recipes.yml` inputs:
+
+| Input | Required | Default | Purpose |
+| --- | --- | --- | --- |
+| `registry_url` | yes | | Registry hostname, without a scheme or path. |
+| `recipes` | yes | | Space-separated recipe paths. |
+| `oras_auth` | yes | | ORAS auth backend. |
+| `signing_policy` | yes | | Path to the signing policy JSON in the caller repository. |
+| `package_prefix` | no | `biochef-plugins-` | OCI package name prefix. |
+| `publish` | no | `true` | Run the publish, signing and provenance jobs. |
+| `publish_catalog` | no | `false` | Publish the catalog. |
+| `biowasm_builder_image` | no | empty | Prebuilt biowasm image, by digest. |
+
+`publish-recipes.yml` secrets:
+
+| Secret | Required | Purpose |
+| --- | --- | --- |
+| `REGISTRY_USERNAME` | yes | Registry user. |
+| `REGISTRY_PASSWORD` | yes | Registry password or token. |
+| `BIOCHEF_CATALOG_SIGNING_PRIVATE_JWK` | no | EC P-256 private JWK that signs the catalog. |
+
+Production publishing, to `registry.biochef.app` with the default prefix, must use `publish-recipes.yml` from master; the workflow fails otherwise.
 
 
 ## Contributing
