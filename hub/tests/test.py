@@ -299,8 +299,8 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
                     print("[Error] Tool execution timed out")
                     return False
 
-                stdout = result.stdout.decode("ascii", errors="replace")
-                stderr = result.stderr.decode("ascii", errors="replace")
+                stdout = result.stdout.decode("utf-8", errors="replace")
+                stderr = result.stderr.decode("utf-8", errors="replace")
                 if result.returncode < 0:
                     print(f"[Error] Tool terminated by signal {-result.returncode}")
                     print(safe(stderr)[:600])
@@ -361,11 +361,7 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
                     continue
                 detected = detect_data_type(content, output_def["types"])
 
-                if not detected:
-                    print(f"[WARNING] Output matches none of its declared types ({output_name}, {tool_bundle['name']}, {cmd})")
-                    print("stderr:")
-                    print(safe(stderr).strip())
-                elif detected not in output_def["types"]:
+                if detected not in output_def["types"]:
                     print(f"[ERROR] Unexpected output type ({output_name}, {tool_bundle['name']}, {cmd})")
                     print(f"  Detected : {detected}")
                     print(f"  Expected : {output_def['types']}")
