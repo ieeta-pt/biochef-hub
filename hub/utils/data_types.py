@@ -383,6 +383,35 @@ def validate_snd(content):
                 return False
     return width is not None
 
+def validate_scoring_matrix(content):
+    # NCBI/BLAST substitution matrix: '#' comments, a header of residue
+    # letters, then one row per letter with that letter and an integer
+    # score for every column (NUC.4.2 has more rows than columns)
+    if not content or not content.strip():
+        return False
+    columns = None
+    rows = []
+    for line in content.strip().split('\n'):
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        fields = line.split()
+        if columns is None:
+            if not all(re.fullmatch(r'[A-Za-z*]', f) for f in fields):
+                return False
+            if len(set(fields)) != len(fields):
+                return False
+            columns = fields
+            continue
+        if len(fields) != len(columns) + 1:
+            return False
+        if not re.fullmatch(r'[A-Za-z*]', fields[0]) or fields[0] in rows:
+            return False
+        if not all(re.fullmatch(r'[+-]?\d+', f) for f in fields[1:]):
+            return False
+        rows.append(fields[0])
+    return bool(rows)
+
 def validate_json(content):
     if not content or not content.strip():
         return False
@@ -504,6 +533,7 @@ ALL_TYPES = [
     {'type': 'SND', 'validator': validate_snd},
     {'type': 'FAI', 'validator': validate_fai},
     {'type': 'NEWICK', 'validator': validate_newick},
+    {'type': 'SCORING_MATRIX', 'validator': validate_scoring_matrix},
     {'type': 'TEXT', 'validator': lambda x: True},  # Default fallback
 ]
 
