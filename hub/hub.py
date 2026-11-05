@@ -193,6 +193,36 @@ def publish_catalog_cmd(args):
     print(f"  digest: {summary.digest_reference}")
     print(f"  {args.channel}: {summary.latest_digest_reference}")
 
+def monitor_registry_cmd(args):
+    from monitor.registry import check_registry
+
+    report = check_registry(
+        registry_url=args.registry,
+        package_prefix=args.package_prefix,
+        policy_path=args.policy,
+        public_jwk_path=args.catalog_public_jwk,
+        channel=args.channel,
+        closed_ports=[int(port) for port in args.closed_ports.split(",") if port.strip()],
+        cosign_bin=args.cosign,
+    )
+    if args.report:
+        with open(args.report, "w") as f:
+            json.dump(report.as_dict(), f, indent=2)
+            f.write("\n")
+    print(
+        f"Registry check complete: catalog={report.catalog_version} "
+        f"sequence={report.catalog_sequence} packages={report.packages} "
+        f"tags={report.tags_checked} signatures={report.signatures_checked} "
+        f"failures={len(report.issues)}"
+    )
+    for issue in report.issues[:args.max_issues]:
+        print(f"  [FAIL] {issue.subject} {issue.code}: {issue.message}")
+    remaining = len(report.issues) - args.max_issues
+    if remaining > 0:
+        print(f"  ... {remaining} additional issues not shown")
+    if report.failed:
+        sys.exit(1)
+
 def index_cmd(args):
     #TODO
     pass
@@ -262,6 +292,18 @@ def main():
     catalog_parser.add_argument("--sequence", type=int, help="Monotonic catalog sequence. Defaults to current Unix time")
     catalog_parser.add_argument("--private-jwk", help="Path to EC P-256 private JWK. Defaults to BIOCHEF_CATALOG_SIGNING_PRIVATE_JWK")
     catalog_parser.set_defaults(func=publish_catalog_cmd)
+
+    monitor_parser = subparsers.add_parser("monitor-registry")
+    monitor_parser.add_argument("--registry", required=True, help="Registry host to check, e.g. registry.biochef.app")
+    monitor_parser.add_argument("--package-prefix", default="biochef-plugins-", help="OCI package name prefix")
+    monitor_parser.add_argument("--policy", required=True, help="Signing verification policy JSON the catalog was published under")
+    monitor_parser.add_argument("--catalog-public-jwk", required=True, help="Path to the catalog's EC P-256 public JWK")
+    monitor_parser.add_argument("--channel", default="latest", help="Catalog channel tag to check")
+    monitor_parser.add_argument("--closed-ports", default="", help="Comma-separated ports that must refuse connections from outside")
+    monitor_parser.add_argument("--cosign", default="cosign", help="Cosign executable to use")
+    monitor_parser.add_argument("--report", help="Write a machine-readable report JSON")
+    monitor_parser.add_argument("--max-issues", type=int, default=50, help="Maximum failures to print")
+    monitor_parser.set_defaults(func=monitor_registry_cmd)
 
     index_parser = subparsers.add_parser("index")
     index_parser.set_defaults(func=index_cmd)
