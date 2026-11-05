@@ -88,6 +88,24 @@ TYPE_DEFINITIONS = [
         # "example": "",
     },
     {
+        # The headers channel gto_fasta_split_streams writes, and
+        # gto_fasta_merge_streams reads: one FASTA header per line, without '>'
+        "id": "GTO_HEADERS",
+        "input": True,
+        "output": True,
+        "example": "seq1\nseq2",
+    },
+    {
+        # The extra channel: a '>' per record, 0x00 per base in ACGT, 0x01 per
+        # base in acgt, everything else as it was. With GTO_HEADERS' example and
+        # the DNA example as the bases, it merges into two records, the second
+        # ending in ten lowercase bases
+        "id": "GTO_EXTRA",
+        "input": True,
+        "output": True,
+        "example": ">" + "\x00" * 49 + "\n>" + "\x00" * 39 + "\x01" * 10,
+    },
+    {
         "id": "POS",
         "input": True,
         "output": False,
