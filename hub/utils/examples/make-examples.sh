@@ -3,8 +3,8 @@
 # type_definitions.py, so every binary example describes the same data:
 # the 98 bp sequence "seq", its two paired reads and its one variant.
 #
-# Needs samtools, bcftools, minimap2, ropebwt3, yak, bedToBigBed and
-# bedGraphToBigWig on PATH. Run from anywhere; writes next to this script.
+# Needs samtools, bcftools, minimap2, ropebwt3, yak, kraken2's build_db,
+# bedToBigBed and bedGraphToBigWig on PATH. Run from anywhere; writes next to this script.
 set -euo pipefail
 
 out=$(cd "$(dirname "$0")" && pwd)
@@ -26,6 +26,10 @@ PY
 cd "$tmp"
 printf 'seq\t98\n' > sizes
 printf 'seq\t0\t10\n' > peaks.bed
+printf 'seq\t2\n' > seqid2taxid.map
+mkdir taxonomy
+printf '1\t|\t1\t|\tno rank\t|\n2\t|\t1\t|\tspecies\t|\n' > taxonomy/nodes.dmp
+printf '1\t|\troot\t|\t\t|\tscientific name\t|\n2\t|\tseq\t|\t\t|\tscientific name\t|\n' > taxonomy/names.dmp
 printf 'seq\t0\t10\t1.5\nseq\t10\t20\t3\n' > cov.bedgraph
 
 samtools sort --no-PG -o reads.bam reads.sam
@@ -36,6 +40,22 @@ bcftools index -c -o calls.bcf.csi calls.bcf
 minimap2 -d ref.mmi ref.fa
 ropebwt3 build -d -o ref.fmd ref.fa
 yak count -o ref.yak ref.fa
+build_db -H ref.hash.k2d -o ref.opts.k2d -t ref.taxo.k2d -n taxonomy -m seqid2taxid.map -k 35 -l 31 -c 100 < ref.fa
+# The database files in one tar, owned by nobody and dated 0, as BioChef's
+# kraken2 operations write it. opts.k2d is a raw struct, whose padding
+# build_db writes from whatever was in memory: zeroed, as BioChef does.
+python3 - <<'PY'
+import io, tarfile
+opts = bytearray(open("ref.opts.k2d", "rb").read())
+opts[33:40] = bytes(7)
+opts[60:64] = bytes(4)
+with tarfile.open("ref.k2d", "w", format=tarfile.USTAR_FORMAT) as tar:
+    for name, data in [("hash.k2d", open("ref.hash.k2d", "rb").read()), ("opts.k2d", bytes(opts)),
+                       ("taxo.k2d", open("ref.taxo.k2d", "rb").read())]:
+        info = tarfile.TarInfo(name)
+        info.size, info.mode = len(data), 0o644
+        tar.addfile(info, io.BytesIO(data))
+PY
 bedToBigBed peaks.bed sizes peaks.bb
 bedGraphToBigWig cov.bedgraph sizes cov.bw
 
@@ -47,5 +67,6 @@ cp calls.bcf.csi "$out/example.bcf.csi"
 cp ref.mmi "$out/example.mmi"
 cp ref.fmd "$out/example.fmd"
 cp ref.yak "$out/example.yak"
+cp ref.k2d "$out/example.k2d"
 cp peaks.bb "$out/example.bb"
 cp cov.bw "$out/example.bw"
