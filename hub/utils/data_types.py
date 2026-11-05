@@ -413,6 +413,22 @@ def validate_fai(content):
 
     return True
 
+def validate_psmc(content):
+    """psmc's result: lines tagged with two capital letters (CC, MM, RD, RS, PA...), with // after each round."""
+    lines = content.strip().split('\n')
+    if not lines[0].startswith('CC'):
+        return False
+    if not all(line == '//' or re.fullmatch(r'[A-Z]{2}(\t.*)?', line) for line in lines):
+        return False
+    return any(line.startswith('RD\t') for line in lines)
+
+def validate_psmc_params(content):
+    """psmc's parameters (-i), as on a PA line of its result: the pattern, then numbers."""
+    fields = content.split()
+    if len(fields) < 5 or not re.fullmatch(r'\d+(\*\d+)?(\+\d+(\*\d+)?)*', fields[0]):
+        return False
+    return all(re.fullmatch(r'[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?', f) for f in fields[1:])
+
 def validate_newick(content):
     """Check ordinary Newick syntax, including multiple trees and comments."""
 
@@ -491,6 +507,8 @@ ALL_TYPES = [
     {'type': 'VCF', 'validator': validate_vcf},
     {'type': 'SAM', 'validator': validate_sam},
     {'type': 'BED', 'validator': validate_bed},
+    {'type': 'PSMC', 'validator': validate_psmc},
+    {'type': 'PSMC_PARAMS', 'validator': validate_psmc_params},
     {'type': 'LIST', 'validator': validate_list},
     {'type': 'GFF', 'validator': validate_gff},
     {'type': 'GTF', 'validator': validate_gtf},

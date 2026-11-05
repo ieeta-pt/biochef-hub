@@ -3,8 +3,9 @@
 # type_definitions.py, so every binary example describes the same data:
 # the 98 bp sequence "seq", its two paired reads and its one variant.
 #
-# Needs samtools, bcftools, minimap2, ropebwt3, yak, bedToBigBed and
-# bedGraphToBigWig on PATH. Run from anywhere; writes next to this script.
+# Needs samtools, bcftools, minimap2, ropebwt3, yak, cntcpg (from psmc),
+# bedToBigBed and bedGraphToBigWig on PATH. Run from anywhere; writes
+# next to this script.
 set -euo pipefail
 
 out=$(cd "$(dirname "$0")" && pwd)
@@ -36,6 +37,7 @@ bcftools index -c -o calls.bcf.csi calls.bcf
 minimap2 -d ref.mmi ref.fa
 ropebwt3 build -d -o ref.fmd ref.fa
 yak count -o ref.yak ref.fa
+cntcpg ref.fa > ref.cpg
 bedToBigBed peaks.bed sizes peaks.bb
 bedGraphToBigWig cov.bedgraph sizes cov.bw
 
@@ -47,5 +49,6 @@ cp calls.bcf.csi "$out/example.bcf.csi"
 cp ref.mmi "$out/example.mmi"
 cp ref.fmd "$out/example.fmd"
 cp ref.yak "$out/example.yak"
+cp ref.cpg "$out/example.cpg"
 cp peaks.bb "$out/example.bb"
 cp cov.bw "$out/example.bw"
