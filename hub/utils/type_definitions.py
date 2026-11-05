@@ -205,6 +205,23 @@ TYPE_DEFINITIONS = [
         "example_file": "example.yak",
     },
     {
+        # A BGT genotype database (bgt): a tar of bgt.bcf, bgt.bcf.csi,
+        # bgt.pbf and bgt.spl, the files bgt import writes for a prefix.
+        "id": "BGT",
+        "input": True,
+        "output": True,
+        "kind": "binary",
+        "example_file": "example.bgt",
+    },
+    {
+        # Flat Metadata Format (bgt): a name, then key:type:value fields.
+        # It describes the one sample of the VCF example.
+        "id": "FMF",
+        "input": True,
+        "output": True,
+        "example": "sample\tsex:Z:F\tdepth:i:30\theight:f:1.65",
+    },
+    {
         "id": "BED",
         "input": True,
         "output": True,
