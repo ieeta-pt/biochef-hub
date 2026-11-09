@@ -1,0 +1,1 @@
+int validate_fastq(char *content, int size);
