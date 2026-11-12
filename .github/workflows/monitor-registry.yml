@@ -1,0 +1,126 @@
+# biochef-hub/.github/workflows/monitor-registry.yml
+name: Monitor BioChef Registry
+on:
+  workflow_call:
+    inputs:
+      registry_url:
+        description: "Registry hostname without a URL scheme or path (for example, registry.biochef.app)."
+        required: true
+        type: string
+      package_prefix:
+        required: false
+        type: string
+        default: biochef-plugins-
+      signing_policy:
+        description: "Signing policy the catalog was published under, in the caller repository."
+        required: true
+        type: string
+      catalog_public_jwk:
+        description: "Catalog public JWK in the caller repository; must be the key the web app pins."
+        required: true
+        type: string
+      closed_ports:
+        description: "Comma-separated ports on the registry host that must refuse connections."
+        required: false
+        type: string
+        default: "5000,5001,2375,2376,8080,8443,9000"
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    concurrency:
+      group: biochef-registry-monitor-${{ inputs.registry_url }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout exact hub source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .hub
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r ./.hub/hub/requirements.txt
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.2
+
+      - name: Check the registry against the signed catalog
+        id: check
+        continue-on-error: true
+        env:
+          REGISTRY_URL: ${{ inputs.registry_url }}
+          PACKAGE_PREFIX: ${{ inputs.package_prefix }}
+          SIGNING_POLICY: ${{ inputs.signing_policy }}
+          CATALOG_PUBLIC_JWK: ${{ inputs.catalog_public_jwk }}
+          CLOSED_PORTS: ${{ inputs.closed_ports }}
+        run: |
+          set -o pipefail
+          python ./.hub/hub/hub.py monitor-registry \
+            --registry "$REGISTRY_URL" \
+            --package-prefix "$PACKAGE_PREFIX" \
+            --policy "$SIGNING_POLICY" \
+            --catalog-public-jwk "$CATALOG_PUBLIC_JWK" \
+            --closed-ports "$CLOSED_PORTS" \
+            --report registry-monitor-report.json | tee registry-monitor.log
+
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: registry-monitor-report
+          path: |
+            registry-monitor-report.json
+            registry-monitor.log
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Open, update or close the tracking issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          OUTCOME: ${{ steps.check.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REGISTRY_URL: ${{ inputs.registry_url }}
+        run: |
+          TITLE="Registry check failed: $REGISTRY_URL"
+          OPEN=$(gh issue list --state open --search "in:title \"$TITLE\"" --json number,title \
+            --jq "map(select(.title == \"$TITLE\")) | .[0].number // empty")
+          if [ "$OUTCOME" = "success" ]; then
+            if [ -n "$OPEN" ]; then
+              gh issue comment "$OPEN" --body "The registry passes every check again: $RUN_URL"
+              gh issue close "$OPEN"
+            fi
+            exit 0
+          fi
+          {
+            echo "The scheduled registry check failed: $RUN_URL"
+            echo
+            echo '```'
+            tail -n 60 registry-monitor.log 2>/dev/null || echo "The check did not produce a log."
+            echo '```'
+          } > body.md
+          if [ -n "$OPEN" ]; then
+            gh issue comment "$OPEN" --body-file body.md
+          else
+            gh issue create --title "$TITLE" --body-file body.md
+          fi
+          exit 1
