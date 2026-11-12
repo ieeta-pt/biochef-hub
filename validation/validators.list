@@ -1,2 +1,3 @@
-fasta
-fastq
+fasta;FASTA;TEXT;example.fasta
+fastq;FASTQ;TEXT;example.fastq
+multi_fasta;Multi-FASTA;TEXT;example_multi.fasta

@@ -8,8 +8,8 @@ from pathlib import Path
 import random
 import string
 
-from utils.data_types import detect_data_type
-from utils.type_definitions import get_example_inputs, is_binary_type
+# from utils.data_types import detect_data_type
+from utils.type_definitions import get_example_inputs, is_binary_type, detect_data_type
 
 seed = random.randint(0, 10_000)
 rnd = random.Random(seed)

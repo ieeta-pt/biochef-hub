@@ -1,0 +1,1 @@
+int validate_multi_fasta(char *content, int size);

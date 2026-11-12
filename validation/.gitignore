@@ -1,1 +1,5 @@
 src/validators_generated.h
+
+validator
+*.js
+*.wasm
