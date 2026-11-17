@@ -64,6 +64,16 @@ Then add it to `ALL_TYPES` before `TEXT`:
 
 Do not add a fake validator just to complete the mapping. A bad validator can make tests pass for the wrong reason.
 
+A binary type's validator takes `bytes` and goes in `BINARY_TYPES` instead:
+
+```python
+{'type': 'NewBinaryType', 'validator': _starts_with(b'NEW\x01')},
+```
+
+Check what the file is, not how it is compressed. BAM, BCF, CSI and tabix indexes, and bgzipped VCF are all BGZF, so their gzip header is the same: `_magic_raw_or_bgzf` and `_starts_with(..., inflated=True)` look at the inflated data, and `_bgzf_text` runs a text validator on it. A binary output whose declared types have a validator is checked by `hub test`; one without stays unchecked.
+
+Order matters in both lists. Detection tries the declared types first, in list order, then the rest, so put the narrower type first: GVCF before VCF, GVCF_GZ before VCF_GZ.
+
 
 ## Update The Frontend
 
