@@ -66,8 +66,21 @@ def validate_bin(content):
     return all(re.fullmatch(r'[01]+', line.strip()) for line in lines)
 
 def validate_packaged_fastq(content):
-    # TODO:
-    return False
+    # gto_fastq_pack's one line per read: the bases and the scores (or, with
+    # -s, the scores and the bases), the header and the "+" line, each ended
+    # by a DEL (0x7f) in place of its newline, then a tab and the read's index
+    if not content or not content.strip('\n'):
+        return False
+    for line in content.strip('\n').split('\n'):
+        fields = line.rstrip('\r').split('\x7f')
+        if len(fields) != 5 or not re.fullmatch(r'\t\d+', fields[4]):
+            return False
+        first, second, _header, plus = fields[:4]
+        if not first or len(first) != len(second) or not plus.startswith('+'):
+            return False
+        if not all(re.fullmatch(r'[!-~]+', f) for f in (first, second)):
+            return False
+    return True
 
 def validate_vcf(content):
     if not content:
