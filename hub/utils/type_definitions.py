@@ -91,6 +91,13 @@ TYPE_DEFINITIONS = [
         "id": "POS",
         "input": True,
         "output": False,
+        # gto's own example, from its manual
+        "example": (
+            "#SCF\t5000000\t5000000\n"
+            "aaa\t1\t1000000\t1\t1000000\tbbbb\t3000000\t4000000\t3000000\t4000000\n"
+            "bbb\t1500000\t2000000\t1500000\t2000000\tcccc\t1500000\t2000000\t1500000\t2000000\n"
+            "aaa\t2000000\t3000000\t2000000\t3000000\tbbbb\t3000000\t2000000\t3000000\t2000000"
+        ),
     },
     {
         "id": "SVG",
