@@ -205,6 +205,58 @@ TYPE_DEFINITIONS = [
         "example_file": "example.yak",
     },
     {
+        # A Kraken 2 database: a tar of hash.k2d, opts.k2d and taxo.k2d, the
+        # files build_db writes and classify and dump_table read together.
+        "id": "KRAKEN2_DB",
+        "input": True,
+        "output": True,
+        "kind": "binary",
+        "example_file": "example.k2d",
+    },
+    {
+        # classify's line per read: C or U (classified or not), its ID, its
+        # taxon, its length, and the taxa of its k-mers, tab-separated.
+        "id": "KRAKEN2_OUTPUT",
+        "input": True,
+        "output": True,
+        "example": "C\tseq\t2\t98\t2:64",
+    },
+    {
+        # A Kraken 2 report per taxon: the percentage of reads in its clade,
+        # the reads in its clade and assigned to it, (with -K, its minimizers
+        # and distinct minimizers,) its rank code, taxonomic ID and indented
+        # name, tab-separated.
+        "id": "KRAKEN2_REPORT",
+        "input": True,
+        "output": True,
+        "example": "100.00\t1\t0\tR\t1\troot\n100.00\t1\t1\tS\t2\t  seq",
+    },
+    {
+        # A Kraken 2 report in MetaPhlAn's style: the path of each taxon
+        # through the ranks, such as d__Bacteria|g__Escherichia, and its
+        # reads.
+        "id": "KRAKEN2_MPA_REPORT",
+        "input": True,
+        "output": True,
+        "example": "s__seq\t1",
+    },
+    {
+        # A sequence ID and its accession number per line, tab-separated, for
+        # finding taxonomic IDs in NCBI's accession2taxid files.
+        "id": "SEQID_ACCESSIONS",
+        "input": True,
+        "output": True,
+        "example": "seq\tNC_000913",
+    },
+    {
+        # NCBI's accession2taxid: a header, then per line an accession, the
+        # accession with its version, a taxonomic ID and a GI, tab-separated.
+        "id": "NCBI_ACCESSION2TAXID",
+        "input": True,
+        "output": False,
+        "example": "accession\taccession.version\ttaxid\tgi\nNC_000913\tNC_000913.3\t511145\t556503834",
+    },
+    {
         "id": "BED",
         "input": True,
         "output": True,
