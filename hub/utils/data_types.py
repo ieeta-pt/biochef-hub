@@ -477,6 +477,31 @@ def validate_newick(content):
             return False
     return trees > 0 and depth == 0 and not seen_node
 
+CODON_NUCLEOTIDES = set('ACGTURYSWKMBDHVNacgturyswkmbdhvn-?.')
+
+def validate_codon_alignment(content):
+    """An alignment of coding sequences in FASTA, as HyPhy's codon analyses
+    read it: two or more sequences of unique names, all as long, in whole
+    codons, of nucleotides (IUPAC codes, gaps and missing data)"""
+    if not isinstance(content, str):
+        return False
+    names, lengths = set(), []
+    for line in content.split('\n'):
+        line = line.rstrip('\r')
+        if line.startswith('>'):
+            name = line[1:]
+            if not name.strip() or name in names:
+                return False
+            names.add(name)
+            lengths.append(0)
+            continue
+        if not line.strip():
+            continue
+        if not lengths or not set(line) <= CODON_NUCLEOTIDES:
+            return False
+        lengths[-1] += len(line)
+    return len(lengths) >= 2 and lengths[0] > 0 and lengths[0] % 3 == 0 and len(set(lengths)) == 1
+
 ALL_TYPES = [
     {'type': 'FASTA', 'validator': validate_fasta},
     {'type': 'Multi-FASTA', 'validator': validate_multi_fasta},
@@ -504,6 +529,7 @@ ALL_TYPES = [
     {'type': 'SND', 'validator': validate_snd},
     {'type': 'FAI', 'validator': validate_fai},
     {'type': 'NEWICK', 'validator': validate_newick},
+    {'type': 'CODON_ALIGNMENT', 'validator': validate_codon_alignment},
     {'type': 'TEXT', 'validator': lambda x: True},  # Default fallback
 ]
 
