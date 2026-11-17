@@ -9,7 +9,7 @@ def validate_fasta(content):
     return bool(sequence) and bool(re.fullmatch(r'[A-Z*.\-\s]+', sequence, re.I))
 
 def validate_multi_fasta(content):
-    if not content: return False
+    if not content or not content.strip(): return False
     
     headers = re.findall(r'^>', content, re.M)
     entries = [entry for entry in content.split('>') if entry.strip()]
@@ -35,7 +35,7 @@ def validate_efa(content):
     return True
 
 def validate_fastq(content):
-    lines = content.strip().split('\n')
+    lines = re.split(r'\r?\n', content.strip())
     if len(lines) % 4 != 0:
         return False
     for i in range(0, len(lines), 4):
@@ -181,7 +181,7 @@ def validate_gff(content):
     return True
 
 def validate_gtf(content):
-    if not content:
+    if not content or not content.strip():
         return False
     lines = content.strip().split('\n')
     for line in lines:
@@ -203,7 +203,7 @@ def validate_gtf(content):
     return True
 
 def validate_paf(content):
-    if not content:
+    if not content or not content.strip():
         return False
     lines = content.strip().split('\n')
     for line in lines:
