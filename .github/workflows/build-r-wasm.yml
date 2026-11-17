@@ -1,0 +1,287 @@
+# biochef-hub/.github/workflows/build-r-wasm.yml
+name: Build R packages for WebAssembly
+
+# Cross-compiling an R package to wasm needs the webR toolchain: Emscripten plus
+# a wasm-targeting LLVM flang, since a large part of CRAN still carries Fortran.
+# Assembling that by hand is impractical, so this runs inside the prebuilt webR
+# container, which already ships the toolchain, a host R 4.6.0, and rwasm.
+#
+# It produces two things: a CRAN-like repository of wasm binaries, and the
+# Emscripten virtual filesystem image that webR actually mounts to make those
+# packages importable. A repository on its own is only half the artefact.
+#
+# The case that prompted it: locfit has no wasm binary in any public
+# repository, and both DESeq2 and edgeR list it under Imports, so neither can
+# be loaded under webR. r-universe attempts a wasm build and records
+# check=FAIL, but its logs have expired. Running it here shows locfit's own
+# sources are not at fault -- it fails on the first file because emscripten-only
+# flags reach a native gcc -- which is an upstream toolchain problem rather than
+# anything this repository can fix. Build it with `packages: locfit` to
+# reproduce.
+
+on:
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: "Comma-separated R package references to build for wasm"
+        required: false
+        type: string
+        # withr is pure R and digest is a small C package, both with no
+        # dependencies outside base. Between them they exercise the two paths
+        # that matter -- packaging alone, and actually driving the wasm
+        # compiler -- so the default run demonstrates the pipeline end to end.
+        default: "withr,digest"
+      dependencies:
+        description: "Also build dependencies: FALSE (none), NA (hard only), TRUE (all)"
+        required: false
+        type: string
+        default: "FALSE"
+      remotes:
+        description: "Prefer rwasm's webR-patched sources: none, or default"
+        required: false
+        type: string
+        default: "none"
+  # workflow_dispatch only appears in the Actions UI once a workflow has reached
+  # the default branch, so this trigger is what allows the job to be exercised
+  # while it is still under review. It is scoped to this file so that unrelated
+  # pushes to the branch do not spend a container pull. Remove it once merged.
+  push:
+    branches: [build-r-wasm-packages]
+    paths: [".github/workflows/build-r-wasm.yml"]
+
+# The job checks nothing out and publishes nothing. It does compile third-party
+# C and Fortran from CRAN, so it should not inherit a token that can write.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    # GitHub's default is `bash -e`, which leaves pipeline failures invisible.
+    # `shell: bash` adds -o pipefail.
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # An emscripten configure step that hangs would otherwise burn the 360
+    # minute default before anyone notices.
+    timeout-minutes: 90
+
+    # Pinned by digest, not by tag: a tag can be repointed, and a silently
+    # updated toolchain would change the meaning of a result we intend to cite
+    # upstream. This digest is ghcr.io/r-wasm/webr:v0.6.0 (linux/amd64), which
+    # ships R 4.6.0 with pak and rwasm already installed into the system
+    # library. To move to a newer webR, resolve the new tag to a digest with:
+    #   crane digest ghcr.io/r-wasm/webr:vX.Y.Z
+    container: ghcr.io/r-wasm/webr@sha256:3fbf3dc3537c5b31bca94dd797dc25364693b18d71b1d0975f318fbfd6269d86
+
+    env:
+      PKGS: ${{ inputs.packages || 'withr,digest' }}
+      DEPS: ${{ inputs.dependencies || 'FALSE' }}
+      REMOTES: ${{ inputs.remotes || 'none' }}
+      OUT_DIR: ${{ github.workspace }}/output
+
+    steps:
+      # rwasm finds the toolchain through WEBR_ROOT and EMSDK, and its .onLoad
+      # only warns when either is missing: it sets no options and carries on, so
+      # the failure surfaces much later inside a package build, pointing
+      # somewhere unrelated. Assert the environment up front instead.
+      #
+      # Note that these are assertions rather than prints. `emcc --version |
+      # head -1 || echo ...` cannot fail, because the exit status of a pipeline
+      # is that of its last command, so `head` masks a missing emcc entirely.
+      - name: Check the toolchain is present
+        run: |
+          set -euo pipefail
+          command -v R       >/dev/null || { echo "::error::R is not on PATH in the container"; exit 1; }
+          command -v Rscript >/dev/null || { echo "::error::Rscript is not on PATH in the container"; exit 1; }
+          command -v emcc    >/dev/null || { echo "::error::emcc is not on PATH in the container"; exit 1; }
+          : "${WEBR_ROOT:?WEBR_ROOT is unset; this is not the webR build container}"
+          : "${EMSDK:?EMSDK is unset; this is not the webR build container}"
+          test -d "$WEBR_ROOT" || { echo "::error::WEBR_ROOT=$WEBR_ROOT does not exist"; exit 1; }
+          test -d "$EMSDK"     || { echo "::error::EMSDK=$EMSDK does not exist"; exit 1; }
+
+          # sed rather than head: with pipefail, head exiting early can leave the
+          # writer killed by SIGPIPE and fail the step for no reason.
+          echo "host R      : $(R --version | sed -n '1p')"
+          echo "emscripten  : $(emcc --version | sed -n '1p')"
+          echo "flang       : ${EMFC:-unset}"
+          echo "target R    : $(cat "$WEBR_ROOT/R/R-VERSION")"
+
+          # The container installs pak and rwasm into the system library, so
+          # they are deliberately not reinstalled here: pulling rwasm from HEAD
+          # would replace the version this webR release was built against, and
+          # would make the build unreproducible for the sake of nothing.
+          # --vanilla so that a stray .Rprofile or .Renviron cannot change what
+          # this reports.
+          Rscript --vanilla -e '
+            if (!requireNamespace("rwasm", quietly = TRUE))
+              stop("rwasm is not installed in this container")
+            cat("rwasm       :", as.character(packageVersion("rwasm")), "\n")
+            if (is.null(getOption("rwasm.webr_root")))
+              stop("rwasm loaded but resolved no webR root; the toolchain is unusable")
+            cat("webr root   :", getOption("rwasm.webr_root"), "\n")
+            cat("wasm R      :", getOption("rwasm.webr_version"), "\n")
+          '
+
+      - name: Build the requested packages for wasm
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUT_DIR/repo" "$OUT_DIR/vfs"
+          Rscript --vanilla -e '
+            pkgs <- trimws(strsplit(Sys.getenv("PKGS"), ",")[[1]])
+            pkgs <- pkgs[nzchar(pkgs)]
+            if (length(pkgs) == 0) stop("no packages requested")
+
+            # add_pkg() defaults to dependencies = FALSE. The Get-started
+            # vignette still claims hard dependencies are built by default;
+            # NEWS.md records that this changed in rwasm 0.1.0, and the code
+            # agrees with NEWS. Passing it explicitly so the behaviour does not
+            # rest on which document is right.
+            deps <- switch(Sys.getenv("DEPS"),
+                           "TRUE" = TRUE, "NA" = NA, "FALSE" = FALSE,
+                           stop("dependencies must be one of TRUE, NA, FALSE"))
+
+            # rwasm keeps a list of 16 packages it prefers to take from
+            # webR-patched forks rather than CRAN, and with the default
+            # remotes = NA it resolves that entire list on every call,
+            # whatever was actually asked for. That resolution currently
+            # fails in this container, taking unrelated builds down with it:
+            #   Error in "res_one_row_df(entries)" : `nrow(out)` must equal 1
+            # Passing NULL makes prefer_remotes() return early and skip it.
+            # Packages that are in the list (shiny, png, mvtnorm, rgl and so
+            # on) do want the patched sources, so this stays selectable.
+            rem <- switch(Sys.getenv("REMOTES"),
+                          "none" = NULL, "default" = NA,
+                          stop("remotes must be one of none, default"))
+
+            cat("building for wasm:", paste(pkgs, collapse = ", "),
+                "( dependencies:", Sys.getenv("DEPS"),
+                ", remotes:", Sys.getenv("REMOTES"), ")\n")
+            rwasm::add_pkg(pkgs,
+                           repo_dir     = file.path(Sys.getenv("OUT_DIR"), "repo"),
+                           dependencies = deps,
+                           remotes      = rem)
+          '
+
+      # A CRAN-like repository is not what webR actually mounts. To use these
+      # packages a caller needs an Emscripten virtual filesystem image -- a
+      # .data (or .data.gz) blob plus its .js.metadata index -- which is what
+      # make_vfs_library() produces from the repository. Emitting only the
+      # repository would ship half an artefact.
+      #
+      # make_library() globs the binary contrib directory and errors if it does
+      # not exist, which is the case whenever every package failed to build. In
+      # that situation the useful diagnosis is the per-package check at the end
+      # of this job, so skip quietly here rather than failing with a confusing
+      # path error and masking it.
+      - name: Package the built library as a virtual filesystem image
+        if: always()
+        run: |
+          set -euo pipefail
+          Rscript --vanilla -e '
+            # Load the namespace before reading any rwasm option: those options
+            # are set in .onLoad, so reading them first yields NULL.
+            if (!requireNamespace("rwasm", quietly = TRUE))
+              stop("rwasm is not installed in this container")
+
+            repo <- file.path(Sys.getenv("OUT_DIR"), "repo")
+            # Built binaries are .tgz. The source tarballs sitting beside them
+            # in the same repository are .tar.gz, so this matches exactly what
+            # make_library() would package, without restating its layout.
+            built <- list.files(repo, pattern = "[.]tgz$", recursive = TRUE)
+            if (length(built) == 0) {
+              message("no wasm binaries were built, so there is no library to package")
+              quit(save = "no", status = 0)
+            }
+            cat("packaging", length(built), "binaries into a filesystem image\n")
+            rwasm::make_vfs_library(out_dir  = file.path(Sys.getenv("OUT_DIR"), "vfs"),
+                                    repo_dir = repo,
+                                    compress = TRUE)
+          '
+
+      # rwasm resolves CRAN through its own internal constant
+      # (ppm_config$cran_mirror, the Posit Package Manager "latest" mirror) and
+      # not through getOption("repos"), so the input version cannot be pinned by
+      # setting a snapshot repository. What can be done is to record exactly what
+      # was resolved, so a result stays interpretable after CRAN moves on. To
+      # pin deliberately, pass a versioned pkgdepends reference such as
+      # locfit@1.5-9.12 in the packages input.
+      - name: Record what was built
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUT_DIR"
+          {
+            echo "container_digest: sha256:3fbf3dc3537c5b31bca94dd797dc25364693b18d71b1d0975f318fbfd6269d86"
+            echo "requested:        $PKGS"
+            echo "dependencies:     $DEPS"
+            echo "remotes:          $REMOTES"
+            echo "host_r:           $(R --version | sed -n '1p')"
+            echo "target_r:         $(cat "$WEBR_ROOT/R/R-VERSION")"
+            echo "emscripten:       $(emcc --version | sed -n '1p')"
+            echo "rwasm:            $(Rscript --vanilla -e 'cat(as.character(packageVersion("rwasm")))')"
+            echo "built:"
+            find "$OUT_DIR" -name '*.tgz' -printf '  - %f\n' 2>/dev/null | sort || true
+            echo "filesystem image:"
+            find "$OUT_DIR/vfs" -type f -printf '  - %f (%s bytes)\n' 2>/dev/null | sort || true
+          } | tee "$OUT_DIR/manifest.txt"
+
+      - name: Report what was produced
+        if: always()
+        run: |
+          set -euo pipefail
+          echo '--- built artefacts ---'
+          # find exits 0 when it matches nothing, so count rather than relying on
+          # its status to detect an empty build.
+          n=$(find "$OUT_DIR" -name '*.tgz' -exec ls -la {} + 2>/dev/null | tee /dev/stderr | wc -l)
+          [ "$n" -gt 0 ] || echo 'no .tgz produced'
+          echo '--- repo index ---'
+          find "$OUT_DIR" -name PACKAGES -exec sh -c 'echo "== $1"; grep -c "^Package:" "$1"' _ {} \; || true
+
+      - name: Upload wasm binaries
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          # v4 artifacts are immutable, so a fixed name collides when two runs
+          # overlap.
+          name: r-wasm-packages-${{ github.run_id }}
+          path: ${{ github.workspace }}/output
+          if-no-files-found: warn
+          retention-days: 30
+
+      # add_pkg() can report success while producing nothing for the package we
+      # actually care about: when dependencies are built too, a run in which
+      # lattice compiles and locfit fails still leaves .tgz files behind. A bare
+      # "did any binary appear" check would call that a pass, which is precisely
+      # the failure this job exists to detect. Assert per requested package.
+      - name: Verify every requested package produced a binary
+        run: |
+          set -euo pipefail
+          rc=0
+          IFS=',' read -ra want <<< "$PKGS"
+          for ref in "${want[@]}"; do
+            # Reduce a pkgdepends reference to a package name:
+            #   cran::locfit             -> locfit
+            #   locfit@1.5-9.12          -> locfit
+            #   tidyverse/ggplot2@v3.4.4 -> ggplot2
+            #   url::https://.../foo_1.0.tar.gz -> foo
+            # Truncating at the first underscore is safe because an R package
+            # name cannot contain one; it is what recovers the name from a
+            # source tarball in a url:: reference.
+            name="${ref##*::}"; name="${name%%@*}"; name="${name##*/}"
+            name="${name%%_*}"
+            name="$(echo "$name" | tr -d '[:space:]')"
+            [ -n "$name" ] || continue
+            if find "$OUT_DIR" -name "${name}_*.tgz" | grep -q .; then
+              echo "ok: $name"
+            else
+              echo "::error::no wasm binary was produced for $name"
+              rc=1
+            fi
+          done
+          exit $rc
