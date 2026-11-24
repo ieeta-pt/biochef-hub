@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html>
+
+<body>
+    <style>
+        select,
+        input,
+        label,
+        button,
+        pre {
+            display: block;
+            margin-bottom: 10px;
+        }
+    </style>
+
+    <select id="toolSelect" disabled>
+        <option value="">Loading tools...</option>
+    </select>
+
+    <input type="file" id="inputFile">
+
+    <label for="args">Arguments:</label>
+    <input type="text" id="args" placeholder="e.g. -q">
+
+    <label for="outputMode">Output mode:</label>
+    <select id="outputMode">
+        <option value="capture">Capture stdout</option>
+        <option value="discard">Discard stdout (/dev/null)</option>
+        <option value="file" selected>Write stdout to file</option>
+    </select>
+
+    <button id="run">Run</button>
+
+    <pre id="output"></pre>
+    <pre id="execution_time"></pre>
+
+
+    <script type="module">
+        import Aioli from './aioli/aioli.mjs';
+
+        const REGISTRY_URL = "https://registry.biochef.app";
+        const INDEX_REPO = "biochef-plugins-index";
+
+        const toolSelect = document.getElementById("toolSelect");
+        const inputFile = document.getElementById("inputFile");
+        const argsInput = document.getElementById("args");
+        const runButton = document.getElementById("run");
+        const output = document.getElementById("output");
+        const executionTime = document.getElementById("execution_time");
+        const outputModeSelect = document.getElementById("outputMode");
+
+        let toolIndex = {};
+
+        async function fetchManifest(repo, tag = "latest") {
+            const response = await fetch(
+                `${REGISTRY_URL}/v2/${repo}/manifests/${tag}`,
+                {
+                    headers: {
+                        Accept: "application/vnd.oci.image.manifest.v1+json"
+                    }
+                }
+            );
+
+            if (!response.ok) {
+                throw new Error(`Failed to fetch manifest: ${response.status}`);
+            }
+
+            return response.json();
+        }
+
+        async function fetchBlob(repo, digest) {
+            const response = await fetch(
+                `${REGISTRY_URL}/v2/${repo}/blobs/${digest}`
+            );
+
+            if (!response.ok) {
+                throw new Error(`Failed to fetch blob: ${response.status}`);
+            }
+
+            return response;
+        }
+
+        async function downloadBlob(repo, digest, type) {
+            const response = await fetchBlob(repo, digest);
+
+            return URL.createObjectURL(
+                new Blob([await response.arrayBuffer()], { type })
+            );
+        }
+
+        async function loadToolIndex() {
+            output.textContent = "Loading tool index...";
+
+            const manifest = await fetchManifest(INDEX_REPO, "index");
+
+            const layer = manifest.layers.find(
+                layer =>
+                    layer.mediaType === "application/json" &&
+                    layer.annotations?.["org.opencontainers.image.title"] === "index.json"
+            );
+
+            if (!layer) {
+                throw new Error("Tool index not found.");
+            }
+
+            const response = await fetchBlob(INDEX_REPO, layer.digest);
+            toolIndex = await response.json();
+
+            toolSelect.innerHTML = '<option value="">Select a tool</option>';
+
+            for (const [repo, tool] of Object.entries(toolIndex)) {
+                const option = document.createElement("option");
+                option.value = repo;
+                option.textContent = tool.name;
+                toolSelect.appendChild(option);
+            }
+
+            toolSelect.disabled = false;
+            output.textContent = "Select a tool to get started.";
+        }
+
+        async function runTool() {
+            const repo = toolSelect.value;
+            const file = inputFile.files[0];
+
+            if (!repo) return;
+
+            if (!file) {
+                output.textContent = "Please select an input file.";
+                return;
+            }
+
+            let CLI;
+            const blobUrls = [];
+
+            try {
+                runButton.disabled = true;
+                executionTime.textContent = "";
+                output.textContent = `Loading ${repo}...`;
+
+                const manifest = await fetchManifest(repo);
+
+                const bundleLayer = manifest.layers.find(
+                    layer =>
+                        layer.mediaType === "application/vnd.biochef.bundle+json" &&
+                        layer.annotations?.["org.opencontainers.image.title"] === "bundle.json"
+                );
+
+                if (!bundleLayer) {
+                    throw new Error("Bundle not found.");
+                }
+
+                const bundleResponse = await fetchBlob(repo, bundleLayer.digest);
+                const bundle = await bundleResponse.json();
+
+                const wasm = bundle.runtime.wasm;
+
+                const wasmUrl = await downloadBlob(
+                    repo, wasm.wasm_digest, "application/wasm"
+                );
+                blobUrls.push(wasmUrl);
+
+                const jsUrl = await downloadBlob(
+                    repo, wasm.js_digest, "application/javascript"
+                );
+                blobUrls.push(jsUrl);
+
+                const runtimeFiles = {
+                    [`${bundle.bin}.wasm`]: wasmUrl
+                };
+
+                if (wasm.data_digest) {
+                    const dataUrl = await downloadBlob(
+                        repo,
+                        wasm.data_digest,
+                        "application/octet-stream"
+                    );
+
+                    blobUrls.push(dataUrl);
+                    runtimeFiles[`${bundle.bin}.data`] = dataUrl;
+                }
+
+                CLI = await new Aioli([{
+                    tool: bundle.bin,
+                    scriptUrl: jsUrl,
+                    runtimeFiles,
+                }], {
+                    printInterleaved: false,
+                    debug: false,
+                    outputMode: outputModeSelect.value
+                });
+
+                output.textContent = "Mounting input file...";
+
+                const paths = await CLI.mount([file]);
+
+                const args = argsInput.value.trim()
+                    ? argsInput.value.trim().split(/\s+/)
+                    : [];
+
+                args.push(paths[0]);
+
+                output.textContent = `Running ${toolIndex[repo].name}...`;
+
+                const start = performance.now();
+
+                const { stdout, stderr } = await CLI.exec(
+                    bundle.bin,
+                    args
+                );
+
+                const elapsedMs = performance.now() - start;
+
+                executionTime.textContent =
+                    `Elapsed: ${elapsedMs.toFixed(10)} ms`;
+
+                output.textContent = "Done!";
+
+            } catch (error) {
+                window.benchmarkError = error.message;
+                output.textContent = error.message;
+                console.error(error);
+
+            } finally {
+                if (CLI) {
+                    try {
+                        await CLI.close();
+                    } catch (error) {
+                        console.error("Failed to close Aioli:", error);
+                    }
+                }
+
+                blobUrls.forEach(URL.revokeObjectURL);
+
+                runButton.disabled = false;
+            }
+        }
+
+        runButton.addEventListener("click", runTool);
+
+        loadToolIndex().catch(error => {
+            output.textContent = error.message;
+            console.error(error);
+        });
+    </script>
+</body>
+
+</html>
