@@ -52,6 +52,7 @@ async function main() {
   try {
     Module = await factory({
       wasmBinary,
+      thisProgram: spec.argv0 || "tool",
       getPreloadedPackage: (name, size) => {
         const root = path.dirname(resolved);
         const file = path.resolve(root, name);
@@ -65,9 +66,6 @@ async function main() {
     // The recipes are built with INVOKE_RUN=0, so main is called explicitly
     // below once the input files are in place.
     noInitialRun: true,
-    print: (line) => {
-      stdout += line + "\n";
-    },
     printErr: (line) => {
       stderr += line + "\n";
     },
@@ -93,6 +91,11 @@ async function main() {
     Module.FS.writeFile(name, Buffer.from(contents, "base64"));
   }
 
+  const outputPath = "/output.txt";
+
+  Module.FS.close(Module.FS.streams[1]);
+  Module.FS.streams[1] = Module.FS.open(outputPath, "w");
+
   let exitCode = 0;
   let completed = true;
   try {
@@ -113,6 +116,10 @@ async function main() {
       stderr += String((err && err.message) || err) + "\n";
     }
   }
+
+  stdout = Module.FS.readFile(outputPath, {
+    encoding: "utf8",
+  });
 
   // Everything the tool left behind, so the caller can look for outputs the
   // same way it does for a native binary. The virtual root also holds the

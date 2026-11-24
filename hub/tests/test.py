@@ -1,3 +1,4 @@
+import difflib
 import os
 import subprocess
 import json
@@ -25,7 +26,11 @@ def test_tools(registry_dir):
     failed = []
 
     print(f"[INFO] Starting tests with seed {seed}")
-
+    
+    report_dir = Path("reports")
+    shutil.rmtree(report_dir, ignore_errors=True)
+    report_dir.mkdir(parents=True, exist_ok=True)
+    
     for tool_dir in registry_path.iterdir():
         if not tool_dir.is_dir():
             continue
@@ -54,15 +59,37 @@ def test_tools(registry_dir):
 
             # Each runtime gets its own directory, and a failed run must not
             # prevent the other runtime or subsequent tools from being tested.
+            results = {}
             for runtime in runtimes:
                 try:
-                    ok = test_tool_outputs(version_dir, tool_bundle, runtime)
+                    (ok, tool_outputs) = test_tool_outputs(
+                        version_dir, tool_bundle, runtime)
+                    results[runtime] = tool_outputs
                 except Exception as err:
                     print(f"[Error] Testing {tool_bundle.get('name')} ({runtime}) raised {type(err).__name__}: {err}")
                     ok = False
 
                 if not ok:
                     failed.append(f"{tool_bundle['name']} ({runtime})")
+
+            for key in results.get("wasm", {}):
+                if "native" not in results or key not in results["native"]:
+                    continue
+
+                native = results["native"][key]
+                wasm = results["wasm"][key]
+
+                if native != wasm:
+                    diff = difflib.unified_diff(
+                        native.splitlines(keepends=True),
+                        wasm.splitlines(keepends=True),
+                        fromfile="NATIVE",
+                        tofile="WASM",
+                        lineterm="\n"
+                    )
+
+                    report = report_dir / f"{tool_dir.name}_{key}.diff"
+                    report.write_text("".join(diff))
 
     return failed
 
@@ -83,7 +110,7 @@ def safe(text):
     return (text or "").encode("utf-8", errors="replace").decode("utf-8")
 
 
-def run_wasm_tool(wasm_path, argv, tool_input, input_files, tmp_path):
+def run_wasm_tool(bin_name, wasm_path, argv, tool_input, input_files, tmp_path):
     """Runs a wasm tool through the Node harness.
 
     Returns (stdout, stderr), or None if the tool could not be run at all --
@@ -92,6 +119,7 @@ def run_wasm_tool(wasm_path, argv, tool_input, input_files, tmp_path):
     the results exactly as it does for a native binary.
     """
     spec = {
+        "argv0": bin_name,
         "argv": argv,
         "stdin": tool_input,
         "files": {
@@ -166,6 +194,7 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
     print(f"[INFO] Testing tool '{tool_bundle['name']}' ({runtime})")
 
     try:
+        tool_outputs = {}
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
 
@@ -253,7 +282,7 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
 
                     # A wasm tool sees its own virtual filesystem, where the
                     # host path means nothing.
-                    argument = file_name if runtime == "wasm" else str(file_path)
+                    argument = file_name # if runtime == "wasm" else str(file_path)
                     if input_def.get("flag"):
                         cmd.append(argument)
                     else:
@@ -282,7 +311,7 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
             # Run tool
             print(f"Testing tool {tool_bundle['name']} ({runtime}) with command {cmd}")
             if runtime == "wasm":
-                run = run_wasm_tool(wasm_path, cmd, tool_input, input_files, tmp_path)
+                run = run_wasm_tool(bin_name, wasm_path, cmd, tool_input, input_files, tmp_path)
                 if run is None:
                     return False
                 stdout, stderr = run
@@ -360,6 +389,7 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
                     print(safe(stderr).strip())
                     continue
                 detected = detect_data_type(content, output_def["types"])
+                tool_outputs[output_name] = content
 
                 if not detected:
                     print(f"[WARNING] Output matches none of its declared types ({output_name}, {tool_bundle['name']}, {cmd})")
@@ -371,7 +401,7 @@ def test_tool_outputs(tool_dir, tool_bundle, runtime):
                     print(f"  Expected : {output_def['types']}")
                     all_ok = False
 
-            return all_ok
+            return (all_ok, tool_outputs)
 
     finally:
         os.chdir(base_dir)
