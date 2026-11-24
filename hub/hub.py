@@ -223,9 +223,18 @@ def monitor_registry_cmd(args):
     if report.failed:
         sys.exit(1)
 
-def index_cmd(args):
-    #TODO
-    pass
+def benchmark_cmd(args):
+    from benchmarks.execution_times import benchmark_execution_times
+
+    if (args.name == "execution-times"):
+        results = benchmark_execution_times(
+            runs=args.runs,
+            warmup=args.warmup,
+            output=args.output,
+            substrates=args.substrates,
+        )   
+
+    print(f"Benchmark complete: {len(results)} measurements")
 
 def main():
     parser = argparse.ArgumentParser()
@@ -305,8 +314,13 @@ def main():
     monitor_parser.add_argument("--max-issues", type=int, default=50, help="Maximum failures to print")
     monitor_parser.set_defaults(func=monitor_registry_cmd)
 
-    index_parser = subparsers.add_parser("index")
-    index_parser.set_defaults(func=index_cmd)
+    benchmark_parser = subparsers.add_parser("benchmark")
+    benchmark_parser.add_argument("name", choices=["execution-times"], help="Benchmark to run")
+    benchmark_parser.add_argument("--runs", type=int, default=5, help="Number of measured benchmark iterations")
+    benchmark_parser.add_argument("--warmup", type=int, default=2, help="Number of preparation iterations")
+    benchmark_parser.add_argument("--output", default="benchmark-results.csv", help="Benchmark results CSV output")
+    benchmark_parser.add_argument("--substrates", nargs="+", choices=["native", "nodejs", "browser_firefox", "browser_chrome"], default=["native", "nodejs", "browser_firefox", "browser_chrome"], help="Execution substrates to benchmark")
+    benchmark_parser.set_defaults(func=benchmark_cmd)
 
     args = parser.parse_args()
     args.func(args)
