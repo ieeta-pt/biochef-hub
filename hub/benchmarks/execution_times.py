@@ -19,30 +19,27 @@ from selenium.webdriver.support.ui import Select, WebDriverWait
 
 dotenv.load_dotenv()
 
-REGISTRY_URL = os.getenv("REGISTRY_URL", "localhost:5000")
 REGISTRY_USERNAME = os.getenv("REGISTRY_USERNAME", "username")
 REGISTRY_PASSWORD = os.getenv("REGISTRY_PASSWORD", "password")
 REGISTRY_INSECURE = os.getenv("REGISTRY_INSECURE", "true").lower() == "true"
 ORAS_AUTH_BACKEND = os.getenv("ORAS_AUTH_BACKEND", "token")
 CATALOG_PACKAGE = os.getenv("CATALOG_PACKAGE", "biochef-plugins")
-BROWSER_URL = os.getenv("BROWSER_URL", "http://localhost:8000/benchmarks/execution_times_aioli.html")
-HEADLESS = os.getenv("BROWSER_HEADLESS", True)
-STDOUT_MODE = os.getenv("STDOUT_MODE", "file")
 
-TOOLS = [
-    ("seqtk.seq", ["seq"], ["benchmarks/datasets/fasta/homo_sapiens_0010MB.fasta"])
-]
+BROWSER_URL = os.getenv(
+    "BROWSER_URL",
+    "http://localhost:8000/benchmarks/execution_times_aioli.html"
+)
 
 
-def run_native(tool_bin, args, input_file, tmpdir):
+def run_native(tool_bin, args, input_file, tmpdir, stdout_mode):
     output_path = Path(tmpdir) / "output.txt"
 
-    if STDOUT_MODE not in ("capture", "discard", "file"):
-        raise ValueError(f"Invalid STDOUT_MODE: {STDOUT_MODE}")
+    if stdout_mode not in ("capture", "discard", "file"):
+        raise ValueError(f"Invalid stdout_mode: {stdout_mode}")
 
-    if STDOUT_MODE == "capture":
+    if stdout_mode == "capture":
         stdout_target = subprocess.PIPE
-    elif STDOUT_MODE == "discard":
+    elif stdout_mode == "discard":
         stdout_target = subprocess.DEVNULL
     else:
         stdout_target = open(output_path, "w")
@@ -62,7 +59,7 @@ def run_native(tool_bin, args, input_file, tmpdir):
             elapsed = (time.perf_counter_ns() - start) / 1e6
 
     finally:
-        if STDOUT_MODE == "file":
+        if stdout_mode == "file":
             stdout_target.close()
 
     if result.returncode:
@@ -75,12 +72,13 @@ def run_native(tool_bin, args, input_file, tmpdir):
     return elapsed
 
 
-def run_node(tool_bin, args, input_file, tmpdir):
+def run_node(tool_bin, args, input_file, tmpdir, stdout_mode):
     spec_path = Path(tmpdir) / "spec.json"
+
     spec_path.write_text(json.dumps({
         "argv": args,
         "input_file": str(Path(input_file).resolve()),
-        "stdout_mode": STDOUT_MODE,
+        "stdout_mode": stdout_mode,
         "output_file": "output.txt",
     }))
 
@@ -88,8 +86,12 @@ def run_node(tool_bin, args, input_file, tmpdir):
     env["NODE_OPTIONS"] = "--max-old-space-size=8192"
 
     result = subprocess.run(
-        ["node", "benchmarks/execution_times_node.js", str(
-            tool_bin.with_suffix(".js")), str(spec_path)],
+        [
+            "node",
+            "benchmarks/execution_times_node.js",
+            str(tool_bin.with_suffix(".js")),
+            str(spec_path),
+        ],
         capture_output=True,
         text=True,
         env=env,
@@ -105,7 +107,7 @@ def run_node(tool_bin, args, input_file, tmpdir):
     return result["elapsed_ms"]
 
 
-def run_browser(driver, tool_repo, args, input_file):
+def run_browser(driver, tool_repo, args, input_file, stdout_mode):
     wait = WebDriverWait(driver, 600)
 
     wait.until(lambda d: d.find_element(By.ID, "toolSelect").is_enabled())
@@ -115,7 +117,7 @@ def run_browser(driver, tool_repo, args, input_file):
     )
 
     Select(driver.find_element(By.ID, "outputMode")).select_by_value(
-        STDOUT_MODE
+        stdout_mode
     )
 
     driver.find_element(By.ID, "inputFile").send_keys(
@@ -152,6 +154,7 @@ def benchmark(
     input_files,
     preparation_runs,
     measured_runs,
+    stdout_mode,
     tool_bin=None,
     tmpdir=None,
     driver=None,
@@ -162,14 +165,28 @@ def benchmark(
         for run in range(1, preparation_runs + measured_runs + 1):
 
             if substrate == "native":
-                elapsed = run_native(tool_bin, args, input_file, tmpdir)
-            elif substrate == "nodejs":
-                elapsed = run_node(tool_bin, args, input_file, tmpdir)
-            else:
-                elapsed = run_browser(driver, tool_repo, args, input_file)
+                elapsed = run_native(
+                    tool_bin, args, input_file, tmpdir, stdout_mode
+                )
 
-            run_type = "preparation" if run <= preparation_runs else "measured"
-            run_number = run if run_type == "preparation" else run - preparation_runs
+            elif substrate == "nodejs":
+                elapsed = run_node(
+                    tool_bin, args, input_file, tmpdir, stdout_mode
+                )
+
+            else:
+                elapsed = run_browser(
+                    driver, tool_repo, args, input_file, stdout_mode
+                )
+
+            run_type = (
+                "preparation" if run <= preparation_runs else "measured"
+            )
+
+            run_number = (
+                run if run_type == "preparation"
+                else run - preparation_runs
+            )
 
             print(
                 f"[{substrate.upper()}] {input_file.name} | "
@@ -189,42 +206,60 @@ def benchmark(
     return results
 
 
-def create_browser(browser):
+def create_browser(browser, headless):
     if browser == "firefox":
         options = webdriver.FirefoxOptions()
-        if HEADLESS:
+
+        if headless:
             options.add_argument("--headless")
+
         driver = webdriver.Firefox(options=options)
+
     else:
         options = webdriver.ChromeOptions()
-        if HEADLESS:
+
+        if headless:
             options.add_argument("--headless=new")
+
         driver = webdriver.Chrome(options=options)
 
     driver.set_script_timeout(600)
     driver.get(BROWSER_URL)
+
     return driver
+
 
 class SilentHTTPRequestHandler(SimpleHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
+
 def benchmark_execution_times(
-    runs=5,
-    warmup=2,
-    output="benchmark-results.csv",
-    substrates=None,
+    tool_repo,
+    args,
+    input_files,
+    runs,
+    warmup,
+    output,
+    substrates,
+    stdout_mode,
+    headless,
+    registry_url,
 ):
+
     if substrates is None:
         substrates = [
             "native",
             "nodejs",
             "browser_firefox",
-            "browser_chrome"
+            "browser_chrome",
         ]
 
+    if stdout_mode not in ("capture", "discard", "file"):
+        raise ValueError(f"Invalid stdout_mode: {stdout_mode}")
+
     oras_client = oras.client.OrasClient(
-        hostname=REGISTRY_URL,
+        hostname=registry_url,
         insecure=REGISTRY_INSECURE,
         auth_backend=ORAS_AUTH_BACKEND,
     )
@@ -236,65 +271,94 @@ def benchmark_execution_times(
 
     results = []
 
-    httpd = HTTPServer(("localhost", 8000), SilentHTTPRequestHandler)
-    server_thread = Thread(target=httpd.serve_forever, daemon=True)
+    httpd = HTTPServer(
+        ("localhost", 8000),
+        SilentHTTPRequestHandler,
+    )
+
+    server_thread = Thread(
+        target=httpd.serve_forever,
+        daemon=True,
+    )
+
     server_thread.start()
 
     try:
-        for tool_repo, args, paths in TOOLS:
-            input_files = sorted(
-                [
-                    f for p in map(Path, paths)
-                    for f in (p.iterdir() if p.is_dir() else [p])
-                    if f.is_file()
-                ]
-            )
+        input_files = sorted(
+            [
+                f for p in map(Path, input_files)
+                for f in (p.iterdir() if p.is_dir() else [p])
+                if f.is_file()
+            ]
+        )
 
-            for substrate in substrates:
-                if substrate.startswith("browser_"):
-                    browser = substrate.replace("browser_", "")
-                    driver = create_browser(browser)
+        for substrate in substrates:
 
-                    try:
-                        results.extend(benchmark(
-                            substrate, tool_repo, args, input_files,
-                            preparation_runs=warmup,
-                            measured_runs=runs,
-                            driver=driver,
-                        ))
-                    finally:
-                        driver.quit()
+            if substrate.startswith("browser_"):
+                browser = substrate.replace("browser_", "")
+                driver = create_browser(browser, headless)
 
-                else:
-                    with tempfile.TemporaryDirectory() as tmpdir:
-                        oras_client.pull(
-                            target=f"{REGISTRY_URL}/{CATALOG_PACKAGE}-{tool_repo}:latest",
-                            outdir=tmpdir,
-                        )
+                try:
+                    results.extend(benchmark(
+                        substrate,
+                        tool_repo,
+                        args,
+                        input_files,
+                        preparation_runs=warmup,
+                        measured_runs=runs,
+                        stdout_mode=stdout_mode,
+                        driver=driver,
+                    ))
 
-                        bundle = json.loads(
-                            (Path(tmpdir) / "bundle.json").read_text()
-                        )
-                        tool_bin = Path(tmpdir) / bundle["bin"]
-                        tool_bin.chmod(tool_bin.stat().st_mode | 0o111)
+                finally:
+                    driver.quit()
 
-                        results.extend(benchmark(
-                            substrate, tool_repo, args, input_files,
-                            preparation_runs=warmup,
-                            measured_runs=runs,
-                            tool_bin=tool_bin,
-                            tmpdir=tmpdir,
-                        ))
+            else:
+                with tempfile.TemporaryDirectory() as tmpdir:
+
+                    oras_client.pull(
+                        target=(
+                            f"{registry_url}/{CATALOG_PACKAGE}-"
+                            f"{tool_repo}:latest"
+                        ),
+                        outdir=tmpdir,
+                    )
+
+                    bundle = json.loads(
+                        (Path(tmpdir) / "bundle.json").read_text()
+                    )
+
+                    tool_bin = Path(tmpdir) / bundle["bin"]
+
+                    tool_bin.chmod(
+                        tool_bin.stat().st_mode | 0o111
+                    )
+
+                    results.extend(benchmark(
+                        substrate,
+                        tool_repo,
+                        args,
+                        input_files,
+                        preparation_runs=warmup,
+                        measured_runs=runs,
+                        stdout_mode=stdout_mode,
+                        tool_bin=tool_bin,
+                        tmpdir=tmpdir,
+                    ))
 
         with open(output, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=[
-                "tool",
-                "file",
-                "file_size_bytes",
-                "substrate",
-                "run_number",
-                "elapsed_ms",
-            ])
+            writer = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "tool",
+                    "file",
+                    "file_size_bytes",
+                    "substrate",
+                    "run_number",
+                    "elapsed_ms",
+                ],
+            )
+
             writer.writeheader()
             writer.writerows(results)
 

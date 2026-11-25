@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import sys
+import shlex
 
 BUILD_FILE = ".build" # file containing the validation results
 BUILD_DIR = "build" # directory where the builders should output the results
@@ -223,18 +224,37 @@ def monitor_registry_cmd(args):
     if report.failed:
         sys.exit(1)
 
-def benchmark_cmd(args):
+def benchmark_execution_times_cmd(args):
     from benchmarks.execution_times import benchmark_execution_times
+    import shlex
 
-    if (args.name == "execution-times"):
-        results = benchmark_execution_times(
-            runs=args.runs,
-            warmup=args.warmup,
-            output=args.output,
-            substrates=args.substrates,
-        )   
+    results = benchmark_execution_times(
+        tool_repo=args.tool,
+        args=shlex.split(args.tool_args),
+        input_files=args.inputs,
+        runs=args.runs,
+        warmup=args.warmup,
+        output=args.output,
+        substrates=args.substrates,
+        stdout_mode=args.stdout_mode,
+        headless=args.headless,
+        registry_url=args.registry_url,
+    )
 
     print(f"Benchmark complete: {len(results)} measurements")
+
+def compare_outputs_cmd(args):
+    from benchmarks.compare_outputs import compare_outputs
+
+    failed = compare_outputs(
+        registry_url=args.registry_url,
+    )
+
+    if failed:
+        print(f"The following tools failed output comparison: {failed}")
+        sys.exit(1)
+
+    print("All output comparisons passed")
 
 def main():
     parser = argparse.ArgumentParser()
@@ -315,12 +335,24 @@ def main():
     monitor_parser.set_defaults(func=monitor_registry_cmd)
 
     benchmark_parser = subparsers.add_parser("benchmark")
-    benchmark_parser.add_argument("name", choices=["execution-times"], help="Benchmark to run")
-    benchmark_parser.add_argument("--runs", type=int, default=5, help="Number of measured benchmark iterations")
-    benchmark_parser.add_argument("--warmup", type=int, default=2, help="Number of preparation iterations")
-    benchmark_parser.add_argument("--output", default="benchmark-results.csv", help="Benchmark results CSV output")
-    benchmark_parser.add_argument("--substrates", nargs="+", choices=["native", "nodejs", "browser_firefox", "browser_chrome"], default=["native", "nodejs", "browser_firefox", "browser_chrome"], help="Execution substrates to benchmark")
-    benchmark_parser.set_defaults(func=benchmark_cmd)
+    benchmark_subparsers = benchmark_parser.add_subparsers(dest="benchmark_command", required=True)
+    
+    execution_times_parser = benchmark_subparsers.add_parser("execution-times")
+    execution_times_parser.add_argument("--tool", required=True, help="Tool repository name to benchmark")
+    execution_times_parser.add_argument("--tool-args", default="", help="Arguments passed to the tool")
+    execution_times_parser.add_argument("--inputs", nargs="+", required=True, help="Input files or directories to benchmark")
+    execution_times_parser.add_argument("--runs", type=int, default=5, help="Number of measured benchmark iterations")
+    execution_times_parser.add_argument("--warmup", type=int, default=2, help="Number of preparation iterations")
+    execution_times_parser.add_argument("--output", default="benchmark-results.csv", help="Benchmark results CSV output")
+    execution_times_parser.add_argument("--substrates", nargs="+", choices=["native", "nodejs", "browser_firefox", "browser_chrome"], default=["native", "browser_firefox", "browser_chrome"], help="Execution substrates to benchmark")
+    execution_times_parser.add_argument("--stdout-mode", choices=["capture", "discard", "file"], default="file", help="How to handle tool stdout")
+    execution_times_parser.add_argument("--headless", action=argparse.BooleanOptionalAction, default=True, help="Run browsers in headless mode")
+    execution_times_parser.add_argument("--registry-url", default="localhost:5000", help="OCI registry URL")
+    execution_times_parser.set_defaults(func=benchmark_execution_times_cmd)
+
+    compare_parser = benchmark_subparsers.add_parser("compare-outputs")
+    compare_parser.add_argument("--registry-url", default="localhost:5000", help="OCI registry URL")
+    compare_parser.set_defaults(func=compare_outputs_cmd)
 
     args = parser.parse_args()
     args.func(args)
