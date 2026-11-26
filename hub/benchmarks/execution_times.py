@@ -15,6 +15,7 @@ import dotenv
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select, WebDriverWait
+from selenium.common.exceptions import TimeoutException
 
 from publish.publish import get_oras_client
 
@@ -69,7 +70,7 @@ def run_native(tool_bin, command, workdir, stdout_mode):
             cwd=workdir,
             stdout=stdout_target,
             stderr=subprocess.PIPE,
-            timeout=600,
+            timeout=5*60,
         )
 
         elapsed = (time.perf_counter_ns() - start) / 1e6
@@ -111,7 +112,7 @@ def run_node(tool_bin, command, workdir, stdout_mode):
         capture_output=True,
         text=True,
         env=env,
-        timeout=600,
+        timeout=5*60,
     )
 
     if result.returncode != 0:
@@ -130,7 +131,8 @@ def run_node(tool_bin, command, workdir, stdout_mode):
 
 
 def run_browser(driver, tool_repo, command, files, stdout_mode):
-    wait = WebDriverWait(driver, 600)
+    driver.refresh()
+    wait = WebDriverWait(driver, 5*60)
 
     wait.until(lambda d: d.find_element(By.ID, "toolSelect").is_enabled())
 
@@ -187,20 +189,31 @@ def benchmark(
 
     for run in range(1, preparation_runs + measured_runs + 1):
 
-        if substrate == "native":
-            elapsed = run_native(
-                tool_bin, command, workdir, stdout_mode
-            )
+        elapsed = None
+        status = "success"
 
-        elif substrate == "nodejs":
-            elapsed = run_node(
-                tool_bin, command, workdir, stdout_mode
-            )
+        try:
+            if substrate == "native":
+                elapsed = run_native(
+                    tool_bin, command, workdir, stdout_mode
+                )
 
-        else:
-            elapsed = run_browser(
-                driver, tool_repo, command, files, stdout_mode
-            )
+            elif substrate == "nodejs":
+                elapsed = run_node(
+                    tool_bin, command, workdir, stdout_mode
+                )
+
+            else:
+                elapsed = run_browser(
+                    driver, tool_repo, command, files, stdout_mode
+                )
+
+        except (subprocess.TimeoutExpired, TimeoutException):
+            status = "timeout"
+
+        except Exception as exc:
+            status = "error"
+            print(f"Error: {exc}")
 
         run_type = (
             "preparation" if run <= preparation_runs else "measured"
@@ -211,9 +224,13 @@ def benchmark(
             else run - preparation_runs
         )
 
+        if elapsed is None and status == "success":
+            status = "timeout"
+
         print(
             f"[{substrate.upper()}] {scenario_name} | "
-            f"{run_type} run {run_number} | {elapsed:.4f} ms"
+            f"{run_type} run {run_number} | "
+            f"{f'{elapsed:.4f} ms' if elapsed is not None else status.upper()}"
         )
 
         if run_type == "measured":
@@ -222,7 +239,10 @@ def benchmark(
                 "scenario": scenario_name,
                 "substrate": substrate,
                 "run_number": run_number,
-                "elapsed_ms": f"{elapsed:.4f}",
+                "elapsed_ms": (
+                    f"{elapsed:.4f}" if elapsed is not None else ""
+                ),
+                "status": status,
             })
 
     return results
@@ -245,7 +265,7 @@ def create_browser(browser, headless):
 
         driver = webdriver.Chrome(options=options)
 
-    driver.set_script_timeout(600)
+    driver.set_script_timeout(5*60)
     driver.get(BROWSER_URL)
 
     return driver
@@ -270,8 +290,9 @@ def benchmark_execution_times(
     substrates = benchmark_config["substrates"]
 
     results = []
-
-    with tempfile.TemporaryDirectory() as tmpdir:
+    
+    Path("./tmp").mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(dir="./tmp") as tmpdir:
 
         oras_client.pull(
             target=(
@@ -299,6 +320,7 @@ def benchmark_execution_times(
         )
 
         server_thread.start()
+        Path(output).write_text("")
 
         try:
             for scenario in benchmark_config["scenarios"]:
@@ -353,24 +375,31 @@ def benchmark_execution_times(
                             workdir=scenario_dir,
                         ))
 
-            with open(output, "w", newline="") as f:
-                writer = csv.DictWriter(
-                    f,
-                    fieldnames=[
-                        "tool",
-                        "scenario",
-                        "substrate",
-                        "run_number",
-                        "elapsed_ms",
-                    ],
-                )
+                with open(output, "a", newline="") as f:
+                    writer = csv.DictWriter(
+                        f,
+                        fieldnames=[
+                            "tool",
+                            "scenario",
+                            "substrate",
+                            "run_number",
+                            "elapsed_ms",
+                            "status"
+                        ],
+                    )
 
-                writer.writeheader()
-                writer.writerows(results)
+                    if f.tell() == 0:
+                        writer.writeheader()
 
-            print(f"\nResults saved to {output}")
+                    writer.writerows(results)
+
+                results.clear()
+
+                print(f"\nResults saved to {output}")
 
         finally:
+            for driver in drivers.values():
+                driver.quit()
             httpd.shutdown()
             server_thread.join()
             httpd.server_close()
