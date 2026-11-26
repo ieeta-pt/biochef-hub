@@ -226,22 +226,28 @@ def monitor_registry_cmd(args):
 
 def benchmark_execution_times_cmd(args):
     from benchmarks.execution_times import benchmark_execution_times
-    import shlex
+    import yaml
+
+    with open(args.config) as f:
+        benchmark_config = yaml.safe_load(f)
 
     results = benchmark_execution_times(
-        tool_repo=args.tool,
-        args=shlex.split(args.tool_args),
-        input_files=args.inputs,
-        runs=args.runs,
-        warmup=args.warmup,
+        benchmark_config=benchmark_config,
         output=args.output,
-        substrates=args.substrates,
-        stdout_mode=args.stdout_mode,
-        headless=args.headless,
         registry_url=args.registry_url,
+        headless=args.headless,
     )
 
     print(f"Benchmark complete: {len(results)} measurements")
+
+def benchmark_template_cmd(args):
+    from benchmarks.templates import generate_execution_times_template
+
+    generate_execution_times_template(
+        tool_repo=args.tool,
+        registry_url=args.registry_url,
+        output=args.output,
+    )
 
 def compare_outputs_cmd(args):
     from benchmarks.compare_outputs import compare_outputs
@@ -338,17 +344,23 @@ def main():
     benchmark_subparsers = benchmark_parser.add_subparsers(dest="benchmark_command", required=True)
     
     execution_times_parser = benchmark_subparsers.add_parser("execution-times")
-    execution_times_parser.add_argument("--tool", required=True, help="Tool repository name to benchmark")
-    execution_times_parser.add_argument("--tool-args", default="", help="Arguments passed to the tool")
-    execution_times_parser.add_argument("--inputs", nargs="+", required=True, help="Input files or directories to benchmark")
-    execution_times_parser.add_argument("--runs", type=int, default=5, help="Number of measured benchmark iterations")
-    execution_times_parser.add_argument("--warmup", type=int, default=2, help="Number of preparation iterations")
-    execution_times_parser.add_argument("--output", default="benchmark-results.csv", help="Benchmark results CSV output")
-    execution_times_parser.add_argument("--substrates", nargs="+", choices=["native", "nodejs", "browser_firefox", "browser_chrome"], default=["native", "browser_firefox", "browser_chrome"], help="Execution substrates to benchmark")
-    execution_times_parser.add_argument("--stdout-mode", choices=["capture", "discard", "file"], default="file", help="How to handle tool stdout")
-    execution_times_parser.add_argument("--headless", action=argparse.BooleanOptionalAction, default=True, help="Run browsers in headless mode")
-    execution_times_parser.add_argument("--registry-url", default="localhost:5000", help="OCI registry URL")
-    execution_times_parser.set_defaults(func=benchmark_execution_times_cmd)
+    execution_times_subparsers = execution_times_parser.add_subparsers(
+        dest="execution_times_command",
+        required=True,
+    )
+
+    run_parser = execution_times_subparsers.add_parser("run")
+    run_parser.add_argument("--config", required=True)
+    run_parser.add_argument("--output", default="benchmark-results.csv")
+    run_parser.add_argument("--registry-url", default="localhost:5000")
+    run_parser.add_argument( "--headless", action=argparse.BooleanOptionalAction, default=True, help="Run browsers in headless mode",)
+    run_parser.set_defaults(func=benchmark_execution_times_cmd)
+    
+    template_parser = execution_times_subparsers.add_parser("template")
+    template_parser.add_argument("--tool", required=True)
+    template_parser.add_argument("--registry-url", default="localhost:5000")
+    template_parser.add_argument("--output", default="benchmark.yaml")
+    template_parser.set_defaults(func=benchmark_template_cmd)
 
     compare_parser = benchmark_subparsers.add_parser("compare-outputs")
     compare_parser.add_argument("--registry-url", default="localhost:5000", help="OCI registry URL")

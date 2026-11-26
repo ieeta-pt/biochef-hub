@@ -3,6 +3,7 @@ import os
 import csv
 import json
 import time
+import shutil
 import tempfile
 import subprocess
 from pathlib import Path
@@ -10,12 +11,12 @@ from threading import Thread
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 
 import dotenv
-import oras.client
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select, WebDriverWait
 
+from publish.publish import get_oras_client
 
 dotenv.load_dotenv()
 
@@ -31,8 +32,24 @@ BROWSER_URL = os.getenv(
 )
 
 
-def run_native(tool_bin, args, input_file, tmpdir, stdout_mode):
-    output_path = Path(tmpdir) / "output.txt"
+def prepare_scenario_files(scenario, workdir):
+    files = []
+
+    for file in scenario.get("files", []):
+        source = Path(file).resolve()
+
+        if not source.is_file():
+            raise FileNotFoundError(f"Scenario file not found: {source}")
+
+        destination = Path(workdir) / source.name
+        shutil.copy2(source, destination)
+        files.append(destination)
+
+    return files
+
+
+def run_native(tool_bin, command, workdir, stdout_mode):
+    output_path = Path(workdir) / "output.txt"
 
     if stdout_mode not in ("capture", "discard", "file"):
         raise ValueError(f"Invalid stdout_mode: {stdout_mode}")
@@ -45,18 +62,17 @@ def run_native(tool_bin, args, input_file, tmpdir, stdout_mode):
         stdout_target = open(output_path, "w")
 
     try:
-        with open(input_file, "rb") as f:
-            start = time.perf_counter_ns()
+        start = time.perf_counter_ns()
 
-            result = subprocess.run(
-                [str(tool_bin)] + args,
-                stdin=f,
-                stdout=stdout_target,
-                stderr=subprocess.PIPE,
-                timeout=600,
-            )
+        result = subprocess.run(
+            [str(tool_bin)] + command.split(),
+            cwd=workdir,
+            stdout=stdout_target,
+            stderr=subprocess.PIPE,
+            timeout=600,
+        )
 
-            elapsed = (time.perf_counter_ns() - start) / 1e6
+        elapsed = (time.perf_counter_ns() - start) / 1e6
 
     finally:
         if stdout_mode == "file":
@@ -72,12 +88,12 @@ def run_native(tool_bin, args, input_file, tmpdir, stdout_mode):
     return elapsed
 
 
-def run_node(tool_bin, args, input_file, tmpdir, stdout_mode):
-    spec_path = Path(tmpdir) / "spec.json"
+def run_node(tool_bin, command, workdir, stdout_mode):
+    spec_path = Path(workdir) / "spec.json"
 
     spec_path.write_text(json.dumps({
-        "argv": args,
-        "input_file": str(Path(input_file).resolve()),
+        "argv": command.split(),
+        "cwd": str(Path(workdir).resolve()),
         "stdout_mode": stdout_mode,
         "output_file": "output.txt",
     }))
@@ -96,8 +112,14 @@ def run_node(tool_bin, args, input_file, tmpdir, stdout_mode):
         text=True,
         env=env,
         timeout=600,
-        check=True,
     )
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Node.js execution failed (exit code {result.returncode})\n"
+            f"STDOUT:\n{result.stdout}\n"
+            f"STDERR:\n{result.stderr}"
+        )
 
     result = json.loads(result.stdout)
 
@@ -107,7 +129,7 @@ def run_node(tool_bin, args, input_file, tmpdir, stdout_mode):
     return result["elapsed_ms"]
 
 
-def run_browser(driver, tool_repo, args, input_file, stdout_mode):
+def run_browser(driver, tool_repo, command, files, stdout_mode):
     wait = WebDriverWait(driver, 600)
 
     wait.until(lambda d: d.find_element(By.ID, "toolSelect").is_enabled())
@@ -120,13 +142,14 @@ def run_browser(driver, tool_repo, args, input_file, stdout_mode):
         stdout_mode
     )
 
-    driver.find_element(By.ID, "inputFile").send_keys(
-        str(Path(input_file).resolve())
-    )
+    for file in files:
+        driver.find_element(By.ID, "inputFile").send_keys(
+            str(Path(file).resolve())
+        )
 
     args_input = driver.find_element(By.ID, "args")
     args_input.clear()
-    args_input.send_keys(" ".join(args))
+    args_input.send_keys(command)
 
     driver.execute_script(
         'document.getElementById("execution_time").textContent = "";'
@@ -150,58 +173,57 @@ def run_browser(driver, tool_repo, args, input_file, stdout_mode):
 def benchmark(
     substrate,
     tool_repo,
-    args,
-    input_files,
+    command,
+    files,
+    scenario_name,
     preparation_runs,
     measured_runs,
     stdout_mode,
     tool_bin=None,
-    tmpdir=None,
+    workdir=None,
     driver=None,
 ):
     results = []
 
-    for input_file in input_files:
-        for run in range(1, preparation_runs + measured_runs + 1):
+    for run in range(1, preparation_runs + measured_runs + 1):
 
-            if substrate == "native":
-                elapsed = run_native(
-                    tool_bin, args, input_file, tmpdir, stdout_mode
-                )
-
-            elif substrate == "nodejs":
-                elapsed = run_node(
-                    tool_bin, args, input_file, tmpdir, stdout_mode
-                )
-
-            else:
-                elapsed = run_browser(
-                    driver, tool_repo, args, input_file, stdout_mode
-                )
-
-            run_type = (
-                "preparation" if run <= preparation_runs else "measured"
+        if substrate == "native":
+            elapsed = run_native(
+                tool_bin, command, workdir, stdout_mode
             )
 
-            run_number = (
-                run if run_type == "preparation"
-                else run - preparation_runs
+        elif substrate == "nodejs":
+            elapsed = run_node(
+                tool_bin, command, workdir, stdout_mode
             )
 
-            print(
-                f"[{substrate.upper()}] {input_file.name} | "
-                f"{run_type} run {run_number} | {elapsed:.4f} ms"
+        else:
+            elapsed = run_browser(
+                driver, tool_repo, command, files, stdout_mode
             )
 
-            if run_type == "measured":
-                results.append({
-                    "tool": tool_repo,
-                    "file": input_file.name,
-                    "file_size_bytes": input_file.stat().st_size,
-                    "substrate": substrate,
-                    "run_number": run_number,
-                    "elapsed_ms": f"{elapsed:.4f}",
-                })
+        run_type = (
+            "preparation" if run <= preparation_runs else "measured"
+        )
+
+        run_number = (
+            run if run_type == "preparation"
+            else run - preparation_runs
+        )
+
+        print(
+            f"[{substrate.upper()}] {scenario_name} | "
+            f"{run_type} run {run_number} | {elapsed:.4f} ms"
+        )
+
+        if run_type == "measured":
+            results.append({
+                "tool": tool_repo,
+                "scenario": scenario_name,
+                "substrate": substrate,
+                "run_number": run_number,
+                "elapsed_ms": f"{elapsed:.4f}",
+            })
 
     return results
 
@@ -235,138 +257,122 @@ class SilentHTTPRequestHandler(SimpleHTTPRequestHandler):
 
 
 def benchmark_execution_times(
-    tool_repo,
-    args,
-    input_files,
-    runs,
-    warmup,
+    benchmark_config,
     output,
-    substrates,
-    stdout_mode,
-    headless,
     registry_url,
+    headless,
 ):
+    oras_client = get_oras_client(registry_url)
 
-    if substrates is None:
-        substrates = [
-            "native",
-            "nodejs",
-            "browser_firefox",
-            "browser_chrome",
-        ]
-
-    if stdout_mode not in ("capture", "discard", "file"):
-        raise ValueError(f"Invalid stdout_mode: {stdout_mode}")
-
-    oras_client = oras.client.OrasClient(
-        hostname=registry_url,
-        insecure=REGISTRY_INSECURE,
-        auth_backend=ORAS_AUTH_BACKEND,
-    )
-
-    oras_client.login(
-        username=REGISTRY_USERNAME,
-        password=REGISTRY_PASSWORD,
-    )
+    tool_repo = benchmark_config["tool"]
+    runs = benchmark_config["runs"]
+    warmup = benchmark_config["warmup"]
+    substrates = benchmark_config["substrates"]
 
     results = []
 
-    httpd = HTTPServer(
-        ("localhost", 8000),
-        SilentHTTPRequestHandler,
-    )
+    with tempfile.TemporaryDirectory() as tmpdir:
 
-    server_thread = Thread(
-        target=httpd.serve_forever,
-        daemon=True,
-    )
-
-    server_thread.start()
-
-    try:
-        input_files = sorted(
-            [
-                f for p in map(Path, input_files)
-                for f in (p.iterdir() if p.is_dir() else [p])
-                if f.is_file()
-            ]
+        oras_client.pull(
+            target=(
+                f"{registry_url}/{CATALOG_PACKAGE}-"
+                f"{tool_repo}:latest"
+            ),
+            outdir=tmpdir,
         )
 
-        for substrate in substrates:
+        bundle = json.loads(
+            (Path(tmpdir) / "bundle.json").read_text()
+        )
 
-            if substrate.startswith("browser_"):
-                browser = substrate.replace("browser_", "")
-                driver = create_browser(browser, headless)
+        tool_bin = Path(tmpdir) / bundle["bin"]
+        tool_bin.chmod(tool_bin.stat().st_mode | 0o111)
 
-                try:
-                    results.extend(benchmark(
-                        substrate,
-                        tool_repo,
-                        args,
-                        input_files,
-                        preparation_runs=warmup,
-                        measured_runs=runs,
-                        stdout_mode=stdout_mode,
-                        driver=driver,
-                    ))
+        httpd = HTTPServer(
+            ("localhost", 8000),
+            SilentHTTPRequestHandler,
+        )
 
-                finally:
-                    driver.quit()
+        server_thread = Thread(
+            target=httpd.serve_forever,
+            daemon=True,
+        )
 
-            else:
-                with tempfile.TemporaryDirectory() as tmpdir:
+        server_thread.start()
 
-                    oras_client.pull(
-                        target=(
-                            f"{registry_url}/{CATALOG_PACKAGE}-"
-                            f"{tool_repo}:latest"
-                        ),
-                        outdir=tmpdir,
-                    )
+        try:
+            for scenario in benchmark_config["scenarios"]:
+                scenario_name = scenario.get("name", "default")
+                command = scenario["command"]
+                stdout_mode = scenario.get("stdout_mode", "file")
 
-                    bundle = json.loads(
-                        (Path(tmpdir) / "bundle.json").read_text()
-                    )
+                scenario_dir = Path(tmpdir) / scenario_name
+                scenario_dir.mkdir()
 
-                    tool_bin = Path(tmpdir) / bundle["bin"]
+                files = prepare_scenario_files(
+                    scenario,
+                    scenario_dir,
+                )
 
-                    tool_bin.chmod(
-                        tool_bin.stat().st_mode | 0o111
-                    )
+                print(f"\nRunning scenario: {scenario_name}")
+                print(f"Command: {command}")
 
-                    results.extend(benchmark(
-                        substrate,
-                        tool_repo,
-                        args,
-                        input_files,
-                        preparation_runs=warmup,
-                        measured_runs=runs,
-                        stdout_mode=stdout_mode,
-                        tool_bin=tool_bin,
-                        tmpdir=tmpdir,
-                    ))
+                for substrate in substrates:
 
-        with open(output, "w", newline="") as f:
-            writer = csv.DictWriter(
-                f,
-                fieldnames=[
-                    "tool",
-                    "file",
-                    "file_size_bytes",
-                    "substrate",
-                    "run_number",
-                    "elapsed_ms",
-                ],
-            )
+                    if substrate.startswith("browser_"):
+                        browser = substrate.replace("browser_", "")
+                        driver = create_browser(browser, headless)
 
-            writer.writeheader()
-            writer.writerows(results)
+                        try:
+                            results.extend(benchmark(
+                                substrate,
+                                tool_repo,
+                                command,
+                                files,
+                                scenario_name,
+                                warmup,
+                                runs,
+                                stdout_mode,
+                                driver=driver,
+                            ))
 
-        print(f"\nResults saved to {output}")
+                        finally:
+                            driver.quit()
 
-    finally:
-        httpd.shutdown()
-        server_thread.join()
-        httpd.server_close()
+                    else:
+                        results.extend(benchmark(
+                            substrate,
+                            tool_repo,
+                            command,
+                            files,
+                            scenario_name,
+                            warmup,
+                            runs,
+                            stdout_mode,
+                            tool_bin=tool_bin,
+                            workdir=scenario_dir,
+                        ))
+
+            with open(output, "w", newline="") as f:
+                writer = csv.DictWriter(
+                    f,
+                    fieldnames=[
+                        "tool",
+                        "scenario",
+                        "substrate",
+                        "run_number",
+                        "elapsed_ms",
+                    ],
+                )
+
+                writer.writeheader()
+                writer.writerows(results)
+
+            print(f"\nResults saved to {output}")
+
+        finally:
+            httpd.shutdown()
+            server_thread.join()
+            httpd.server_close()
 
     return results

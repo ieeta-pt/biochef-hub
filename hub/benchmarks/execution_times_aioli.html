@@ -17,7 +17,7 @@
         <option value="">Loading tools...</option>
     </select>
 
-    <input type="file" id="inputFile">
+    <input type="file" id="inputFile" multiple>
 
     <label for="args">Arguments:</label>
     <input type="text" id="args" placeholder="e.g. -q">
@@ -121,12 +121,12 @@
 
         async function runTool() {
             const repo = toolSelect.value;
-            const file = inputFile.files[0];
+            const files = inputFile.files;
 
             if (!repo) return;
 
-            if (!file) {
-                output.textContent = "Please select an input file.";
+            if (!files.length) {
+                output.textContent = "Please select at least one input file.";
                 return;
             }
 
@@ -190,15 +190,13 @@
                     outputMode: outputModeSelect.value
                 });
 
-                output.textContent = "Mounting input file...";
+                output.textContent = "Mounting input files...";
 
-                const paths = await CLI.mount([file]);
+                await CLI.mount(Array.from(files));
 
                 const args = argsInput.value.trim()
                     ? argsInput.value.trim().split(/\s+/)
                     : [];
-
-                args.push(paths[0]);
 
                 output.textContent = `Running ${toolIndex[repo].name}...`;
 
@@ -214,7 +212,7 @@
                 executionTime.textContent =
                     `Elapsed: ${elapsedMs.toFixed(10)} ms`;
 
-                output.textContent = "Done!";
+                output.textContent = stderr || "Done!";
 
             } catch (error) {
                 window.benchmarkError = error.message;

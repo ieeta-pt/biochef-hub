@@ -12,18 +12,16 @@ async function main() {
   const resolved = path.resolve(modulePath);
   const spec = JSON.parse(fs.readFileSync(specPath, "utf8"));
 
-  if (!spec.input_file) {
-    throw new Error("spec.input_file is required");
-  }
+  const cwd = path.resolve(spec.cwd || process.cwd());
 
-  const inputFile = path.resolve(spec.input_file);
-
-  if (!fs.existsSync(inputFile)) {
-    throw new Error(`Input file does not exist: ${inputFile}`);
+  if (!fs.existsSync(cwd)) {
+    throw new Error(`Working directory does not exist: ${cwd}`);
   }
 
   const factory = require(resolved);
-  const wasmBinary = fs.readFileSync(resolved.replace(/\.js$/, ".wasm"));
+  const wasmBinary = fs.readFileSync(
+    resolved.replace(/\.js$/, ".wasm")
+  );
 
   let stdout = "";
   let stderr = "";
@@ -39,11 +37,17 @@ async function main() {
     Module = await factory({
       wasmBinary,
       noInitialRun: true,
-      print: line => {
-        if (stdoutMode === "capture") {
-          stdout += String(line) + "\n";
-        }
+
+      locateFile: (file) => {
+          return path.join(path.dirname(resolved), file);
       },
+
+      print: line => {
+        // if (stdoutMode === "capture") {
+        //   stdout += String(line) + "\n";
+        // }
+      },
+
       printErr: line => {
         if (stderr.length < 65536) {
           stderr += String(line) + "\n";
@@ -79,27 +83,44 @@ async function main() {
       throw new Error("NODEFS is unavailable. Rebuild with -lnodefs.js.");
     }
 
-    // Mount the directory containing the input file
-    const inputDir = path.dirname(inputFile);
+    // Mount the scenario working directory.
+    FS.mkdir("/work");
 
-    FS.mkdir("/host");
-    FS.mount(NODEFS, { root: inputDir }, "/host");
+    FS.mount(
+      NODEFS,
+      { root: cwd },
+      "/work"
+    );
 
-    const inputName = path.basename(inputFile);
+    // Translate arguments referring to files in the working directory.
+    const argv = (spec.argv || []).map(arg => {
+      if (typeof arg !== "string") {
+        return arg;
+      }
 
-    const argv = [
-      ...(spec.argv || []),
-      `/host/${inputName}`,
-    ];
+      const resolvedArg = path.resolve(cwd, arg);
 
-    const outputPath = "output.txt"
+      if (
+        resolvedArg.startsWith(cwd + path.sep) &&
+        fs.existsSync(resolvedArg) &&
+        fs.statSync(resolvedArg).isFile()
+      ) {
+        return `/work/${path.relative(cwd, resolvedArg).split(path.sep).join("/")}`;
+      }
 
+      return arg;
+    });
+
+    // Set the working directory inside WASM.
+    FS.chdir("/work");
+
+    // Configure stdout.
     if (stdoutMode !== "capture") {
       FS.close(FS.streams[1]);
 
       const destination = stdoutMode === "discard"
         ? "/dev/null"
-        : outputPath;
+        : "output.txt";
 
       FS.streams[1] = FS.open(destination, "w");
     }
@@ -108,21 +129,11 @@ async function main() {
 
     Module.callMain(argv);
 
-    if (stdoutMode !== "capture") {
-      stdout = ""
-    }
+    elapsedMs = performance.now() - start;
 
-    // if (stdoutMode === "file") {
-    //   stdout = FS.readFile(outputPath, {
-    //     encoding: "utf8"
-    //   });
-    // }
-
-    // if (stdoutMode === "discard") {
+    // if (stdoutMode !== "capture") {
     //   stdout = "";
     // }
-
-    elapsedMs = performance.now() - start;
 
   } catch (err) {
     completed = false;
@@ -134,7 +145,7 @@ async function main() {
     completed,
     exitCode,
     elapsed_ms: elapsedMs,
-    stdout,
+    stdout: "",
     stderr,
     files: {},
   }));
